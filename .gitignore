@@ -1,0 +1,25 @@
+# Secrets — never commit these
+.env
+backend/.env
+backend/agent_config.yaml
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Outputs
+backend/outputs/
+*.pdf
+
+# OS
+.DS_Store
+
+# Virtual Enviroment
+env/

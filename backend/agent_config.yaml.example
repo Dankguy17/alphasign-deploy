@@ -1,0 +1,26 @@
+# ─────────────────────────────────────────────────────────────
+# Band agent credentials — one entry per agent created on the
+# Band dashboard (https://app.band.ai/agents -> New Agent -> Remote Agent).
+#
+# Each agent gets its own agent_id (UUID, shown in agent settings)
+# and api_key (shown ONCE at creation time — copy it immediately).
+#
+# Copy this file to agent_config.yaml and fill in real values.
+# agent_config.yaml is gitignored — never commit real keys.
+# ─────────────────────────────────────────────────────────────
+
+signal_processing:
+  agent_id: "00000000-0000-0000-0000-000000000001"
+  api_key: "band_api_key_for_signal_processing"
+
+narrative_analyst:
+  agent_id: "00000000-0000-0000-0000-000000000002"
+  api_key: "band_api_key_for_narrative_analyst"
+
+latent_state:
+  agent_id: "00000000-0000-0000-0000-000000000003"
+  api_key: "band_api_key_for_latent_state"
+
+executive:
+  agent_id: "00000000-0000-0000-0000-000000000004"
+  api_key: "band_api_key_for_executive"

@@ -1,0 +1,29 @@
+[project]
+name = "alphasign-backend"
+version = "0.1.0"
+description = "AlphaSign multi-agent risk intelligence platform — backend agents"
+requires-python = ">=3.10"
+dependencies = [
+    "openai>=1.0",
+    "python-dotenv>=1.0",
+    "pyyaml>=6.0",
+    "httpx>=0.27",
+    "numpy",
+    "pandas",
+    "scipy",
+    "yfinance",
+    "pykalman",
+    "fastapi",
+    "uvicorn[standard]",
+]
+
+# Add the Band SDK with whatever adapter extra fits your agent's LLM client.
+# For agents calling Featherless/AI-ML API directly via the openai client,
+# the "pydantic-ai" or generic adapter is usually the right starting point —
+# check docs.band.ai/integrations/sdks/overview for the current adapter list.
+#
+#   uv add "band-sdk[pydantic-ai]"
+#
+# or, if you want execution reporting tuned for Claude specifically:
+#
+#   uv add "band-sdk[anthropic]"
