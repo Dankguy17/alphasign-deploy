@@ -4,14 +4,15 @@ agents/latent_state/agent.py
 The Latent Space agent for AlphaSign.
 
 This agent consumes yfinance/FRED-style data payloads produced by the Signal
-Processing agent, computes one-step Kalman predictions, and asks Claude to
-summarize the latent state. It intentionally does not fetch market data itself;
-control flow between agents can be added later without changing these tools.
+Processing agent, computes one-step Kalman predictions, and asks a Featherless
+LLM to summarize the latent state. It intentionally does not fetch market data
+itself; control flow between agents can be added later without changing these
+tools.
 
 Setup:
   1. Add a 'latent_state' block to agent_config.yaml.
-  2. Set ANTHROPIC_API_KEY in backend/.env.
-  3. Optional: set LATENT_STATE_MODEL, default claude-sonnet-4-6.
+  2. Set FEATHERLESS_API_KEY in backend/.env.
+  3. Optional: set LATENT_STATE_MODEL, default deepseek-ai/DeepSeek-V4-Pro.
 
 Run:
     cd backend/
@@ -25,10 +26,10 @@ import json
 import logging
 import os
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_core.tools import tool
+from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
 from thenvoi import Agent
 from thenvoi.adapters import LangGraphAdapter
@@ -71,7 +72,7 @@ YOUR RESPONSE back to the Band room must contain:
   - Predicted next value/change/return when applicable
   - Noise variance and latest innovation z-score
   - Whether structural_regime_shift is true
-  - Claude-generated summary + confidence
+  - Featherless-generated summary + confidence
   - A concise conclusion tied to the provided lens
 
 DELIVERING YOUR RESPONSE TO THE ROOM
@@ -132,7 +133,8 @@ def compute_kalman_bundle(bundle_json: str) -> str:
 @tool
 def generate_kalman_summary(kalman_json: str, lens: str = "") -> str:
     """
-    Ask Claude to summarize a Kalman prediction result in 2-3 sentences.
+    Ask the configured Featherless model to summarize a Kalman prediction
+    result in 2-3 sentences.
 
     Args:
         kalman_json: JSON returned by compute_kalman_prediction or
@@ -189,14 +191,20 @@ async def main():
     agent_id, api_key = load_agent_credentials("latent_state")
     logger.info("Loaded Latent Space agent: %s", agent_id)
 
+    featherless_api_key = os.getenv("FEATHERLESS_API_KEY")
+    if not featherless_api_key or featherless_api_key.startswith("your_"):
+        raise RuntimeError("FEATHERLESS_API_KEY is required for the Latent Space agent")
+
     rate_limiter = InMemoryRateLimiter(
         requests_per_second=0.2,
         check_every_n_seconds=0.1,
         max_bucket_size=1,
     )
 
-    llm = ChatAnthropic(
-        model=os.getenv("LATENT_STATE_MODEL", "claude-sonnet-4-6"),
+    llm = ChatOpenAI(
+        api_key=featherless_api_key,
+        model=os.getenv("LATENT_STATE_MODEL", "deepseek-ai/DeepSeek-V4-Pro"),
+        base_url=os.getenv("FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1"),
         temperature=0.2,
         rate_limiter=rate_limiter,
         callbacks=[AgentWhiteboxLogger()],

@@ -74,8 +74,7 @@ or AI/ML API to reason about it, then send a response back via Band.
    any) are wrong before you write any agent logic.
 7. Once all three pass, create a chat room on Band, add all 4 agents as
    participants, and start building each agent's `agent.py` using the
-   pattern from the Anthropic/Pydantic AI adapter tutorials
-   (`docs.band.ai/integrations/sdks/tutorials/`).
+   existing LangGraph adapter pattern.
 
 ## Note on Band's collaboration model
 

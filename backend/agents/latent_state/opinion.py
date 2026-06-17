@@ -1,9 +1,9 @@
 """
 agents/latent_state/opinion.py
 
-LLM interpretation layer for Kalman predictions. This module uses Claude by
-default because the Latent Space agent is intended to reason over filtered
-state estimates rather than fetch data itself.
+LLM interpretation layer for Kalman predictions. This module uses Featherless
+via its OpenAI-compatible API because the Latent Space agent is intended to
+reason over filtered state estimates rather than fetch data itself.
 """
 
 from __future__ import annotations
@@ -65,27 +65,32 @@ def _prediction_lines(prediction: dict) -> list[str]:
 
 def generate_latent_summary(kalman_result: dict, lens: str | None = None) -> dict:
     """
-    Generate a short Claude-written interpretation for a Kalman result.
+    Generate a short Featherless-written interpretation for a Kalman result.
 
-    Requires ANTHROPIC_API_KEY. The model can be overridden with
-    LATENT_STATE_MODEL, defaulting to claude-sonnet-4-6.
+    Requires FEATHERLESS_API_KEY. The model can be overridden with
+    LATENT_STATE_MODEL, defaulting to deepseek-ai/DeepSeek-V4-Pro.
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY")
+    api_key = os.getenv("FEATHERLESS_API_KEY")
     if not api_key or api_key.startswith("your_"):
-        raise ValueError("ANTHROPIC_API_KEY is required for latent summary generation")
+        raise ValueError("FEATHERLESS_API_KEY is required for latent summary generation")
 
-    from anthropic import Anthropic
+    from langchain_core.messages import HumanMessage, SystemMessage
+    from langchain_openai import ChatOpenAI
 
-    client = Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model=os.getenv("LATENT_STATE_MODEL", "claude-sonnet-4-6"),
-        max_tokens=300,
+    llm = ChatOpenAI(
+        api_key=api_key,
+        model=os.getenv("LATENT_STATE_MODEL", "deepseek-ai/DeepSeek-V4-Pro"),
+        base_url=os.getenv("FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1"),
         temperature=0.2,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": _build_user_prompt(kalman_result, lens)}],
+        max_tokens=300,
     )
-    raw = "".join(block.text for block in response.content if getattr(block, "type", None) == "text")
-    return _parse_response(raw)
+    response = llm.invoke(
+        [
+            SystemMessage(content=SYSTEM_PROMPT),
+            HumanMessage(content=_build_user_prompt(kalman_result, lens)),
+        ]
+    )
+    return _parse_response(response.content)
 
 
 def _parse_response(raw: str) -> dict:
