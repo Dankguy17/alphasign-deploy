@@ -26,6 +26,7 @@ from typing import Any
 from dotenv import find_dotenv, load_dotenv
 
 from .sentiment import aggregate_sentiment, score_article
+from .source_reliability import aggregate_reliability, attach_reliability
 
 
 load_dotenv(find_dotenv())
@@ -75,12 +76,16 @@ def detect_themes(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def rank_articles(articles: list[dict[str, Any]], limit: int = 8) -> list[dict[str, Any]]:
     ranked = []
     for article in articles:
-        item = score_article(article)
+        item = attach_reliability(score_article(article))
         days_ago = item.get("days_ago")
         recency_score = max(0, 14 - int(days_ago or 14)) / 14
         sentiment_score = abs(float(item["sentiment"]["score"]))
+        reliability_score = float(item["source_reliability"]["confidence"])
         has_description = 0.2 if item.get("description") else 0.0
-        item["relevance_score"] = round(recency_score + sentiment_score + has_description, 4)
+        item["relevance_score"] = round(
+            recency_score + sentiment_score + reliability_score + has_description,
+            4,
+        )
         ranked.append(item)
     ranked.sort(key=lambda item: item.get("relevance_score", 0), reverse=True)
     return ranked[:limit]
@@ -123,6 +128,7 @@ def build_narrative_radar(
     ranked_articles = rank_articles(articles, limit=max_articles)
     themes = detect_themes(ranked_articles)
     sentiment = aggregate_sentiment(ranked_articles)
+    reliability = aggregate_reliability(ranked_articles)
     windows = _choose_windows(themes, ranked_articles)
     metrics = _requested_metrics(themes)
 
@@ -163,7 +169,13 @@ def build_narrative_radar(
         "reason": "Check whether the news-linked move looks like a trend/regime shift rather than short noise.",
     }
 
-    confidence = min(0.9, 0.35 + 0.05 * len(ranked_articles) + min(0.2, abs(sentiment["score"])))
+    confidence = min(
+        0.95,
+        0.25
+        + 0.04 * len(ranked_articles)
+        + min(0.2, abs(sentiment["score"]))
+        + 0.25 * reliability["average_confidence"],
+    )
 
     return {
         "packet_type": "narrative_radar",
@@ -178,11 +190,13 @@ def build_narrative_radar(
                 "published_at": article.get("published_at"),
                 "url": article.get("url", ""),
                 "sentiment": article.get("sentiment", {}),
+                "source_reliability": article.get("source_reliability", {}),
             }
             for article in ranked_articles
         ],
         "themes": themes,
         "aggregate_sentiment": sentiment,
+        "source_reliability": reliability,
         "bullish_thesis": bullish,
         "bearish_thesis": bearish,
         "catalysts": top_titles[:3],

@@ -13,8 +13,21 @@ Instead of returning a plain news summary, the agent produces:
 - missing evidence
 - Signal Processing request
 - Latent State request
+- source reliability tiering
 
 That gives judges a visible multi-agent reasoning loop: the News agent does research, forms hypotheses, and asks the quant agents to verify or reject them.
+
+## Source Reliability Engine
+
+Every article is tagged with a tier and confidence:
+
+- Tier 1, 0.92-0.97: SEC/company/government sources and official press-release wires.
+- Tier 2, 0.84: major publications and recognized financial media.
+- Tier 3, 0.72: analyst, industry research, and market commentary sources.
+- Tier 4, 0.52-0.58: aggregators, reposted feeds, blogs, or unknown sources.
+
+The Narrative Radar includes both per-article reliability and aggregate source
+quality, so Executive can prefer higher-confidence evidence.
 
 ## Free-first data path
 

@@ -33,6 +33,7 @@ from .article_extract import extract_article_text
 from .news_fetch import fetch_company_news, fetch_yfinance_news, fetch_yahoo_rss_news
 from .prompts import SYSTEM_PROMPT
 from .sentiment import score_text_sentiment
+from .source_reliability import score_source_reliability
 from .synthesis import build_narrative_radar, generate_narrative_brief
 
 
@@ -119,6 +120,16 @@ def score_news_sentiment(text: str) -> str:
 
 
 @tool
+def score_source_reliability_tool(article_json: str) -> str:
+    """
+    Score one article/source with the Source Reliability Engine.
+
+    Returns tier, confidence, source_type, and reason.
+    """
+    return json.dumps(score_source_reliability(json.loads(article_json)))
+
+
+@tool
 def build_narrative_radar_tool(ticker: str, articles_json: str, lens: str = "") -> str:
     """
     Convert fetched articles into a structured Narrative Radar.
@@ -152,6 +163,7 @@ TOOLS = [
     fetch_free_yahoo_news,
     extract_article_text_tool,
     score_news_sentiment,
+    score_source_reliability_tool,
     build_narrative_radar_tool,
     generate_narrative_brief_tool,
 ]
