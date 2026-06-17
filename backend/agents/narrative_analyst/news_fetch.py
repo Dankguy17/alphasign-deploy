@@ -29,6 +29,13 @@ from dateutil import parser as date_parser
 NEWSAPI_URL = "https://newsapi.org/v2/everything"
 YAHOO_RSS_URL = "https://feeds.finance.yahoo.com/rss/2.0/headline"
 
+PLACEHOLDER_KEY_PREFIXES = (
+    "your_",
+    "optional_",
+    "replace_",
+    "paste_",
+)
+
 
 COMPANY_HINTS: dict[str, str] = {
     "AAPL": "Apple",
@@ -81,6 +88,18 @@ def _days_ago(published_at: str | None) -> int | None:
 
 def _clean_text(value: Any) -> str:
     return " ".join(str(value or "").replace("\n", " ").split())
+
+
+def _is_real_key(value: str | None) -> bool:
+    """Return False for empty/default placeholder values from .env examples."""
+    if not value:
+        return False
+    lowered = value.strip().lower()
+    if not lowered:
+        return False
+    if lowered in {"none", "null", "na", "n/a", "changeme", "todo"}:
+        return False
+    return not lowered.startswith(PLACEHOLDER_KEY_PREFIXES)
 
 
 def _article(
@@ -148,7 +167,7 @@ def search_newsapi(
     to free keyless sources without treating it as a fatal error.
     """
     api_key = os.getenv("NEWS_API_KEY", "")
-    if not api_key or api_key.startswith("your_"):
+    if not _is_real_key(api_key):
         return []
 
     since = (_utc_now() - timedelta(days=days_back)).date().isoformat()
@@ -162,10 +181,19 @@ def search_newsapi(
         "apiKey": api_key,
     }
 
-    with httpx.Client(timeout=15.0, follow_redirects=True) as client:
-        response = client.get(NEWSAPI_URL, params=params)
-        response.raise_for_status()
-        payload = response.json()
+    try:
+        with httpx.Client(timeout=15.0, follow_redirects=True) as client:
+            response = client.get(NEWSAPI_URL, params=params)
+            response.raise_for_status()
+            payload = response.json()
+    except httpx.HTTPStatusError as exc:
+        # Keep live demos resilient: a bad/expired NewsAPI key should not stop
+        # the free Yahoo/yfinance fallbacks from working.
+        print(f"[Narrative Analyst] NewsAPI unavailable ({exc.response.status_code}); using free fallbacks.")
+        return []
+    except httpx.HTTPError as exc:
+        print(f"[Narrative Analyst] NewsAPI request failed ({exc}); using free fallbacks.")
+        return []
 
     articles = []
     for raw in payload.get("articles", []):

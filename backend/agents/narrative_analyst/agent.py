@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import os
+from uuid import UUID
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.rate_limiters import InMemoryRateLimiter
@@ -37,6 +38,38 @@ from .synthesis import build_narrative_radar, generate_narrative_brief
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _validate_band_credentials(agent_id: str, api_key: str) -> None:
+    """
+    Fail early with a useful message when agent_config.yaml still contains
+    placeholders. Band otherwise returns a generic 401 later in startup.
+    """
+    try:
+        parsed = UUID(str(agent_id))
+    except ValueError as exc:
+        raise RuntimeError(
+            "Invalid narrative_analyst.agent_id in agent_config.yaml. "
+            "Copy the UUID from your Band Remote Agent settings."
+        ) from exc
+
+    if str(parsed) == "00000000-0000-0000-0000-000000000002":
+        raise RuntimeError(
+            "agent_config.yaml still contains the placeholder narrative_analyst agent_id. "
+            "Create a Band Remote Agent for narrative_analyst and paste its real agent_id."
+        )
+
+    lowered_key = str(api_key or "").strip().lower()
+    if (
+        not lowered_key
+        or lowered_key.startswith("band_api_key")
+        or lowered_key.startswith("your_")
+        or lowered_key.startswith("optional_")
+    ):
+        raise RuntimeError(
+            "agent_config.yaml still contains a placeholder narrative_analyst api_key. "
+            "Paste the real API key shown when you create the Band Remote Agent."
+        )
 
 
 @tool
@@ -185,6 +218,7 @@ def _build_llm() -> object:
 
 async def main():
     agent_id, api_key = load_agent_credentials("narrative_analyst")
+    _validate_band_credentials(agent_id, api_key)
     logger.info("Loaded Narrative Analyst agent: %s", agent_id)
 
     adapter = LangGraphAdapter(

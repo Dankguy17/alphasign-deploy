@@ -39,8 +39,16 @@ Live ticker test:
 python scripts/test_narrative_agent_local.py --live MSFT
 ```
 
+If you do not have a real NewsAPI key, either delete `NEWS_API_KEY` from
+`.env` or leave it as a placeholder. The agent will use free Yahoo/yfinance
+fallbacks.
+
 Run the Band-connected agent:
 
 ```bash
 python -m agents.narrative_analyst.agent
 ```
+
+If Band returns `401 Unauthorized`, fill in the real `narrative_analyst`
+`agent_id` and `api_key` in `agent_config.yaml`. The example values are
+placeholders and will not connect.
