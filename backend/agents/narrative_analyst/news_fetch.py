@@ -18,6 +18,7 @@ Run a quick live smoke test from backend/:
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import quote_plus
@@ -55,6 +56,26 @@ COMPANY_HINTS: dict[str, str] = {
     "DIS": "Disney",
 }
 
+GENERIC_COMPANY_WORDS = {
+    "a",
+    "an",
+    "and",
+    "bank",
+    "class",
+    "co",
+    "company",
+    "corp",
+    "corporation",
+    "group",
+    "holdings",
+    "inc",
+    "ltd",
+    "of",
+    "platforms",
+    "plc",
+    "the",
+}
+
 
 def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
@@ -88,6 +109,13 @@ def _days_ago(published_at: str | None) -> int | None:
 
 def _clean_text(value: Any) -> str:
     return " ".join(str(value or "").replace("\n", " ").split())
+
+
+def _text_blob(article: dict[str, Any]) -> str:
+    return " ".join(
+        _clean_text(article.get(key, ""))
+        for key in ("title", "description", "content", "url", "source")
+    )
 
 
 def _is_real_key(value: str | None) -> bool:
@@ -133,6 +161,43 @@ def company_hint(ticker: str, company_name: str | None = None) -> str:
     if explicit:
         return explicit
     return COMPANY_HINTS.get(ticker.upper(), ticker.upper())
+
+
+def _company_tokens(ticker: str, company_name: str | None = None) -> set[str]:
+    company = company_hint(ticker, company_name)
+    tokens = {
+        token.lower()
+        for token in re.findall(r"[A-Za-z0-9]+", company)
+        if len(token) >= 3 and token.lower() not in GENERIC_COMPANY_WORDS
+    }
+    tokens.add(ticker.lower())
+    return tokens
+
+
+def is_relevant_article(
+    article: dict[str, Any],
+    ticker: str,
+    company_name: str | None = None,
+) -> bool:
+    """
+    Check whether a broad free-feed result is actually about this ticker.
+
+    Yahoo Finance RSS sometimes returns adjacent market/sector headlines even
+    when a ticker query is supplied. Keep direct ticker/company mentions and
+    discard obvious cross-ticker noise before synthesis.
+    """
+    blob = _text_blob(article).lower()
+    if not blob:
+        return False
+
+    symbol = ticker.lower()
+    if re.search(rf"(?<![a-z0-9]){re.escape(symbol)}(?![a-z0-9])", blob):
+        return True
+
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", blob)
+        for token in _company_tokens(ticker, company_name)
+    )
 
 
 def build_news_query(ticker: str, company_name: str | None = None, lens: str | None = None) -> str:
@@ -346,6 +411,13 @@ def fetch_company_news(
     articles.extend(fetch_yfinance_news(ticker, limit=limit))
 
     deduped = dedupe_articles(articles)
+    relevant = [
+        article
+        for article in deduped
+        if is_relevant_article(article, ticker, company_name)
+    ]
+    if relevant:
+        deduped = relevant
     deduped.sort(key=lambda item: item.get("published_at") or "", reverse=True)
     return deduped[:limit]
 
