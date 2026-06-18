@@ -23,3 +23,7 @@ backend/outputs/
 
 # Virtual Enviroment
 env/
+
+# UV
+
+backend/uv.lock
