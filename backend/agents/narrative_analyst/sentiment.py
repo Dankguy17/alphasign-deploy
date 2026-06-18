@@ -111,12 +111,24 @@ def score_text_sentiment(text: str) -> dict[str, Any]:
     }
 
 
-def score_article(article: dict[str, Any]) -> dict[str, Any]:
+def score_article(article: dict[str, Any] | str) -> dict[str, Any]:
+    # 1. Normalize raw string items into a standard dict format
+    if isinstance(article, str):
+        article = {
+            "title": article,
+            "description": "",
+            "content": article,
+            "text": ""
+        }
+
+    # 2. Extract and combine the text fields safely
     text = " ".join(
         str(article.get(key, ""))
         for key in ("title", "description", "content", "text")
         if article.get(key)
     )
+    
+    # 3. Complete processing using the standardized dict structure
     scored = dict(article)
     scored["sentiment"] = score_text_sentiment(text)
     return scored

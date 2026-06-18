@@ -236,7 +236,7 @@ def _call_openai_compatible(system_prompt: str, user_prompt: str) -> str:
     else:
         base_url = os.getenv("FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1")
         api_key = os.getenv("FEATHERLESS_API_KEY", "")
-        model = os.getenv("FEATHERLESS_MODEL", "deepseek-ai/DeepSeek-V3-0324")
+        model = os.getenv("FEATHERLESS_MODEL", "Qwen/Qwen2.5-7B-Instruct")
 
     if not api_key or api_key.startswith("your_"):
         raise RuntimeError(f"Missing API key for NARRATIVE_LLM_PROVIDER={provider}")
