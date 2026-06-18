@@ -44,8 +44,10 @@ Setup (in addition to backend/.env and agent_config.yaml):
          api_key:  "your-api-key"
   2. Create the agent on app.band.ai/agents (Remote Agent type) and
      add it as a participant in your test chat room.
-  3. (Optional) set SIGNAL_OPINION_PROVIDER=gemini|featherless|aimlapi
-     in backend/.env — defaults to "gemini".
+  3. Set GROQ_API_KEY in backend/.env. Optionally set
+     SIGNAL_PROCESSING_MODEL or GROQ_MODEL to override the default Groq model.
+  4. (Optional) set SIGNAL_OPINION_PROVIDER=groq|gemini|featherless|aimlapi
+     in backend/.env — defaults to "groq".
 
 Run:
     cd backend/
@@ -58,15 +60,14 @@ import asyncio
 import json
 import logging
 import os
+from typing import Any
 
 from thenvoi import Agent
 from thenvoi.adapters import LangGraphAdapter
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 
-# Built-in LangChain rate limiter utility to manage API quotas smoothly
-from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_core.callbacks import BaseCallbackHandler
 
 # Centralized workspace environment and configuration management
@@ -77,8 +78,22 @@ from .calculations import compute_all, log_returns, rolling_volatility, beta_and
 from .data_fetch import fetch_price_series, fetch_market_series, fetch_fred_series
 from .opinion import generate_opinion
 
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=os.getenv("SIGNAL_LOG_LEVEL", "WARNING").upper())
 logger = logging.getLogger(__name__)
+logger.setLevel(os.getenv("SIGNAL_AGENT_LOG_LEVEL", "INFO").upper())
+
+for noisy_logger in (
+    "httpx",
+    "thenvoi",
+    "phoenix_channels_python_client",
+    "langgraph",
+    "langchain",
+):
+    logging.getLogger(noisy_logger).setLevel(os.getenv("SIGNAL_DEP_LOG_LEVEL", "WARNING").upper())
+
+DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+SIGNAL_DEBUG = os.getenv("SIGNAL_DEBUG", "").lower() in {"1", "true", "yes", "on"}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,37 +136,77 @@ quantitatively. You decide:
    FRED data is optional — only fetch it if the lens makes it relevant.
 
 4. AFTER you have the numbers, call generate_signal_opinion with the findings
-   JSON and the original lens. This produces a 2-3 sentence interpretation
+   JSON and the original lens. This produces an interpretation
    you should include in your reply.
 
 YOUR RESPONSE back to the Band room must contain:
-  • The metrics you computed, clearly labelled
-  • The time window(s) you chose and WHY
-  • Which metrics you chose and WHY
-  • The opinion + confidence from generate_signal_opinion
-  • A clear conclusion addressing the Narrative Analyst's lens
+  • A report title with the ticker(s), for example:
+    "SIGNAL PROCESSING ANALYSIS — AAPL"
+  • A one-paragraph opening that says what lens/hypothesis you tested.
+  • "Time Windows Chosen": list each window with start/end dates and explain
+    why that window is appropriate for the lens. If the request asks about a
+    recent narrative shift, usually compare at least 1M and 3M.
+  • "Metrics Chosen": name each metric and explain what it tests:
+      - log_return: latest momentum / event reaction
+      - volatility: realized uncertainty / abnormal movement benchmark
+      - beta: market sensitivity
+      - market_adjusted_return: relative performance after market exposure
+      - idiosyncratic_vol: company-specific movement not explained by market
+  • "Quantitative Findings": provide the actual computed numbers, grouped by
+    ticker and window. Do not omit numbers. Use clear labels and 4-6 decimals
+    for metrics.
+  • "Addressing The Narrative Questions": explicitly answer the user's or
+    Narrative Analyst's subquestions. If no subquestions were provided, create
+    2-3 relevant questions from the lens and answer them using the numbers.
+  • "Signal Opinion": include the generated opinion and confidence. Convert
+    confidence to a percentage in the final report.
+  • "Conclusion": give a direct assessment of whether the quantitative signal
+    supports, weakly supports, or does not support the lens. Mention the key
+    metric evidence driving that call.
+
+DEPTH AND NUMBERS REQUIREMENTS
+──────────────────────────────
+Your final response should be analytical and substantive, not a terse summary.
+Do not only say "the metrics are X." Explain what the values imply, compare
+windows when multiple windows are used, and tie each interpretation back to
+the narrative lens. Avoid inventing news or article dates that were not given.
+If article-specific dates are requested but unavailable, say that limitation
+clearly and use the available window metrics as supporting evidence.
+
+Use this general format:
+
+SIGNAL PROCESSING ANALYSIS — <TICKER>
+
+I have completed the quantitative analysis for <ticker>, focusing on:
+"<lens>"
+
+Time Windows Chosen:
+...
+
+Metrics Chosen:
+...
+
+Quantitative Findings:
+...
+
+Addressing The Narrative Questions:
+...
+
+Signal Opinion:
+...
+Confidence: <percent>
+
+Conclusion:
+...
 
 If a message doesn't contain enough information to identify a ticker or
 hypothesis, ask for clarification rather than guessing.
 
-DELIVERING YOUR RESPONSE TO THE ROOM (CRITICAL — READ THIS LAST PART CAREFULLY)
-─────────────────────────────────────────────────────────────────────────────
-Simply writing out your findings as a normal chat reply does NOT deliver
-anything to the Band room. The room only ever sees content that is passed
-to the `thenvoi_send_message` tool's `content` argument.
-
-Therefore:
-  1. Do all of your analysis first (fetch/compute tools, then
-     generate_signal_opinion).
-  2. Assemble your full write-up — metrics, the window(s) you chose and WHY,
-     the metrics you chose and WHY, the opinion + confidence, and your
-     conclusion addressing the Narrative Analyst's lens.
-  3. Your VERY LAST step for this turn MUST be a call to `thenvoi_send_message`
-     with that complete write-up as the `content` argument.
-
-Never end your turn by just outputting the write-up as plain text. A plain
-text final answer with no `thenvoi_send_message` call means your analysis is
-LOST — nobody in the room (including the Narrative Analyst) will ever see it.
+DELIVERING YOUR RESPONSE TO THE ROOM
+────────────────────────────────────
+Do not send progress updates, status messages, or interim findings. Use tools
+silently, then finish with one complete final answer. The runtime will deliver
+that final answer to the Band room automatically.
 """
 
 
@@ -296,7 +351,7 @@ def compute_all_metrics(ticker: str, window: str = "6M") -> str:
         window: one of "1M", "3M", "4M", "6M", "1Y", "2Y"
     Returns JSON: all metrics plus ticker, window, start, end.
     """
-    print(f"⚡ [LOCAL CALCULATION] Running formulas for {ticker} over a {window} window...")
+    logger.debug("Running formulas for %s over a %s window", ticker, window)
 
     asset_df  = fetch_price_series(ticker, window)
     market_df = fetch_market_series(window)
@@ -380,6 +435,12 @@ def generate_signal_opinion(findings_json: str, lens: str = "") -> str:
             "start": findings.get("start", "unknown"),
             "end":   findings.get("end",   "unknown"),
         }
+    else:
+        findings["window"] = {
+            "label": findings["window"].get("label") or findings.get("window_label", "unknown"),
+            "start": findings["window"].get("start") or findings.get("start", "unknown"),
+            "end":   findings["window"].get("end")   or findings.get("end",   "unknown"),
+        }
 
     result = generate_opinion(findings, lens=lens or None)
     return json.dumps(result)
@@ -404,54 +465,180 @@ class AgentWhiteboxLogger(BaseCallbackHandler):
     def on_llm_end(self, response, **kwargs):
         for generation in response.generations:
             for g in generation:
-                # 1. Check if the LLM decided to execute mathematical/data tools
-                #    (this includes the platform's thenvoi_send_message tool)
+                # 1. Check if the LLM decided to execute local analysis tools.
                 if hasattr(g, 'message') and getattr(g.message, 'tool_calls', None):
                     print("\n" + "═"*50)
                     print("🤖 [AGENT DECISION] -> LLM requesting tool execution:")
-                    sent_to_band = False
                     for tool_call in g.message.tool_calls:
                         print(f"   🔧 Tool: {tool_call['name']}({tool_call['args']})")
-                        if tool_call['name'] == 'thenvoi_send_message':
-                            sent_to_band = True
-                    if sent_to_band:
-                        print("   ✅ thenvoi_send_message called -> this WILL post to the Band room")
                     print("═"*50 + "\n")
 
                 # 2. The LLM generated a plain-text final response with NO tool call.
-                #    This is just the model ending its turn locally — it is NOT
-                #    automatically sent to Band. If this contains your findings
-                #    packet, it means thenvoi_send_message was never called and
-                #    the analysis was lost.
+                #    The adapter posts this once after the graph completes.
                 elif g.text:
-                    print("\n" + "📝"*3 + " [AGENT FINAL TEXT — LOCAL ONLY] " + "📝"*3)
+                    print("\n" + "📝"*3 + " [AGENT FINAL TEXT — WILL POST ONCE] " + "📝"*3)
                     print(g.text)
-                    print("⚠️  No tool call accompanied this text. Unless")
-                    print("   thenvoi_send_message was called in an earlier step")
-                    print("   of this same turn, THIS CONTENT WAS NOT SENT TO BAND.")
                     print("═"*80 + "\n")
+
+
+class ReliableDeliveryLangGraphAdapter(LangGraphAdapter):
+    """
+    Run the analysis with local tools only, then publish exactly one final
+    response to Band after the graph completes.
+    """
+
+    async def on_message(
+        self,
+        msg: Any,
+        tools: Any,
+        history: Any,
+        participants_msg: str | None,
+        contacts_msg: str | None,
+        *,
+        is_session_bootstrap: bool,
+        room_id: str,
+    ) -> None:
+        logger.info("[HANDLE] Message %s in room %s", msg.id, room_id)
+
+        # Pass no Thenvoi platform tools to the graph. The factory still adds
+        # this agent's local analysis tools, and this adapter handles delivery.
+        graph = self.graph_factory([]) if self.graph_factory else self._static_graph
+        if not graph:
+            raise RuntimeError("No graph available")
+
+        messages: list[Any] = []
+        if is_session_bootstrap:
+            if self.graph_factory and room_id not in self._bootstrapped_rooms:
+                messages.append(("system", self._system_prompt))
+                self._bootstrapped_rooms.add(room_id)
+            if history:
+                messages.extend(history)
+
+        if participants_msg:
+            messages.append(("user", f"[System]: {participants_msg}"))
+
+        if contacts_msg:
+            messages.append(("user", f"[System]: {contacts_msg}"))
+
+        messages.append(("user", msg.format_for_llm()))
+        graph_input = {"messages": messages}
+
+        final_text: str | None = None
+
+        try:
+            async for event in graph.astream_events(
+                graph_input,
+                config={
+                    "configurable": {"thread_id": room_id},
+                    "recursion_limit": self.recursion_limit,
+                },
+                version="v2",
+            ):
+                event_type = event.get("event")
+                if event_type == "on_chat_model_end":
+                    candidate = self._extract_plain_model_text(event)
+                    if candidate:
+                        final_text = candidate
+
+            if not final_text:
+                raise RuntimeError("Signal Processing produced no final response text.")
+
+            mentions = self._reply_mentions(msg, tools)
+            logger.info("Posting one final Signal Processing response to Band.")
+            await tools.send_message(final_text, mentions)
+
+            logger.info("[DONE] Message %s processed successfully", msg.id)
+
+        except Exception as e:
+            logger.error("Error processing message %s: %s", msg.id, e, exc_info=SIGNAL_DEBUG)
+            try:
+                await tools.send_event(content=f"Error: {e}", message_type="error")
+            except Exception:
+                pass
+            raise
+
+    @staticmethod
+    def _extract_plain_model_text(event: dict[str, Any]) -> str | None:
+        output = event.get("data", {}).get("output")
+        if not output:
+            return None
+
+        text = ReliableDeliveryLangGraphAdapter._message_text(output)
+        if text:
+            return text
+
+        for generation in getattr(output, "generations", []) or []:
+            candidates = generation if isinstance(generation, list) else [generation]
+            for candidate in candidates:
+                message = getattr(candidate, "message", candidate)
+                text = ReliableDeliveryLangGraphAdapter._message_text(message)
+                if text:
+                    return text
+
+        return None
+
+    @staticmethod
+    def _reply_mentions(msg: Any, tools: Any) -> list[str]:
+        participants = getattr(tools, "participants", []) or []
+        sender_id = getattr(msg, "sender_id", None)
+
+        for participant in participants:
+            if participant.get("id") == sender_id:
+                handle = participant.get("handle") or participant.get("name")
+                return [handle] if handle else []
+
+        for participant in participants:
+            handle = participant.get("handle") or participant.get("name")
+            if handle and "signal-processing" not in handle and "signal_processing" not in handle:
+                return [handle]
+
+        return []
+
+    @staticmethod
+    def _message_text(message: Any) -> str | None:
+        if getattr(message, "tool_calls", None):
+            return None
+
+        content = getattr(message, "content", None)
+        if not content:
+            content = getattr(message, "text", None)
+
+        if isinstance(content, str):
+            text = content.strip()
+            return text or None
+
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if isinstance(part, str):
+                    parts.append(part)
+                elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                    parts.append(part["text"])
+            text = "\n".join(parts).strip()
+            return text or None
+
+        return None
+
 
 async def main():
     # Dynamically extract credentials via our shared config layer
     agent_id, api_key = load_agent_credentials("signal_processing")
     logger.info(f"Loaded agent: {agent_id}")
 
-    # Set up a strict rate limiter to stay safely under Gemini Free Tier's 5 RPM limit.
-    # 4 requests per minute = 4 / 60 = 0.066 requests per second.
-    # max_bucket_size=1 completely eliminates bursting spikes.
-    rate_limiter = InMemoryRateLimiter(
-        requests_per_second=0.066,
-        check_every_n_seconds=0.1,
-        max_bucket_size=1,
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if not groq_api_key:
+        raise RuntimeError("GROQ_API_KEY is required to run the Signal Processing agent.")
+
+    model = os.getenv("SIGNAL_PROCESSING_MODEL") or os.getenv("GROQ_MODEL") or DEFAULT_GROQ_MODEL
+    llm = ChatOpenAI(
+        model=model,
+        api_key=groq_api_key,
+        base_url=os.getenv("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
+        temperature=0,
+        callbacks=[AgentWhiteboxLogger()] if SIGNAL_DEBUG else None,
     )
 
-    llm = ChatGoogleGenerativeAI(
-        model="gemini-2.5-flash",
-        rate_limiter=rate_limiter,
-        callbacks=[AgentWhiteboxLogger()]
-    )
-
-    adapter = LangGraphAdapter(
+    adapter = ReliableDeliveryLangGraphAdapter(
         llm=llm,
         checkpointer=InMemorySaver(),
         custom_section=SYSTEM_PROMPT,
@@ -466,7 +653,7 @@ async def main():
         rest_url=os.getenv("THENVOI_REST_URL"),
     )
 
-    logger.info("Signal Processing agent is live with active rate-limiting. Press Ctrl+C to stop.")
+    logger.info(f"Signal Processing agent is live on Groq model {model}. Press Ctrl+C to stop.")
     await agent.run()
 
 

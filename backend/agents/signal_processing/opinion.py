@@ -5,10 +5,9 @@ Takes the computed findings (from calculations.py) plus optional Band
 thread context, and produces a short natural-language "opinion" string
 via an LLM call.
 
-This is the swap point for model providers. During early development,
-set SIGNAL_OPINION_PROVIDER=gemini (free tier). Once the team is ready
-to upgrade, switch to "featherless" or "aimlapi" — same function
-signature, no other code changes needed.
+This is the swap point for model providers. The default provider is Groq.
+Set SIGNAL_OPINION_PROVIDER=groq|gemini|featherless|aimlapi to switch
+providers without changing the function signature.
 
 Usage:
     python -m agents.signal_processing.opinion   (from backend/)
@@ -26,6 +25,9 @@ from dotenv import load_dotenv, find_dotenv
 # agents/signal_processing/, or anywhere else. No relative path hacks.
 load_dotenv(find_dotenv())
 
+DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+
 
 SYSTEM_PROMPT = """You are the Signal Processing agent in AlphaSign, a \
 multi-agent financial risk intelligence system. You have just computed \
@@ -33,25 +35,38 @@ quantitative metrics for a stock over a specific time window using \
 standard formulas (log return, volatility, beta, market-adjusted return, \
 idiosyncratic volatility).
 
-Your job is to write a SHORT (2-3 sentence) opinion interpreting these \
+Your job is to write a substantive signal opinion interpreting these \
 numbers in plain language. Rules:
 
 - Only make claims that follow directly from the numbers provided.
 - If "lens" or prior context from other agents is given, relate your \
 numbers to it explicitly (e.g. "this supports/does not support the \
 hypothesis that...").
+- Explain what the most important numbers imply for momentum, market-relative \
+performance, volatility, and company-specific movement when those metrics are \
+present.
+- If multiple metrics point in different directions, say that clearly instead \
+of forcing a bullish or bearish conclusion.
 - Do not invent additional data, news, or context not given to you.
 - State your confidence (0.0-1.0) as a measure of how strong/clear the \
 signal is, not how interesting it is.
 - Output ONLY valid JSON: {"opinion": "...", "confidence": 0.0}
+- Keep "opinion" to one analytical paragraph of 4-6 sentences.
 """
 
 
 def _build_user_prompt(findings: dict, lens: str | None, prior_context: str | None) -> str:
+    window = findings.get("window")
+    if not isinstance(window, dict):
+        window = {"label": window or "unknown", "start": "unknown", "end": "unknown"}
+
+    window_label = window.get("label") or findings.get("window_label") or "unknown"
+    window_start = window.get("start") or findings.get("start") or "unknown"
+    window_end = window.get("end") or findings.get("end") or "unknown"
+
     lines = [
-        f"Asset: {findings['asset']}",
-        f"Window: {findings['window']['label']} "
-        f"({findings['window']['start']} to {findings['window']['end']})",
+        f"Asset: {findings.get('asset') or findings.get('ticker') or 'unknown'}",
+        f"Window: {window_label} ({window_start} to {window_end})",
     ]
     # Only include metrics that are actually present in this findings packet
     # (since the agent may have chosen to compute only a subset).
@@ -91,6 +106,9 @@ def _call_gemini(system_prompt: str, user_prompt: str) -> str:
 def _call_openai_compatible(
     system_prompt: str, user_prompt: str, base_url: str, api_key: str, model: str
 ) -> str:
+    if not api_key:
+        raise RuntimeError(f"Missing API key for OpenAI-compatible model '{model}'.")
+
     from openai import OpenAI
 
     client = OpenAI(api_key=api_key, base_url=base_url)
@@ -103,6 +121,18 @@ def _call_openai_compatible(
         max_tokens=300,
     )
     return response.choices[0].message.content
+
+
+def _call_groq(system_prompt: str, user_prompt: str) -> str:
+    return _call_openai_compatible(
+        system_prompt,
+        user_prompt,
+        base_url=os.getenv("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
+        api_key=os.getenv("GROQ_API_KEY", ""),
+        model=os.getenv("SIGNAL_OPINION_MODEL")
+        or os.getenv("SIGNAL_PROCESSING_MODEL")
+        or os.getenv("GROQ_MODEL", DEFAULT_GROQ_MODEL),
+    )
 
 
 def _call_featherless(system_prompt: str, user_prompt: str) -> str:
@@ -126,9 +156,10 @@ def _call_aimlapi(system_prompt: str, user_prompt: str) -> str:
 
 
 _PROVIDERS = {
-    "gemini":     _call_gemini,
+    "groq":        _call_groq,
+    "gemini":      _call_gemini,
     "featherless": _call_featherless,
-    "aimlapi":    _call_aimlapi,
+    "aimlapi":     _call_aimlapi,
 }
 
 
@@ -145,9 +176,9 @@ def generate_opinion(
     Returns: {"opinion": str, "confidence": float}
 
     Provider is selected via SIGNAL_OPINION_PROVIDER env var
-    ("gemini" | "featherless" | "aimlapi"), default "gemini".
+    ("groq" | "gemini" | "featherless" | "aimlapi"), default "groq".
     """
-    provider_name = os.getenv("SIGNAL_OPINION_PROVIDER", "gemini")
+    provider_name = os.getenv("SIGNAL_OPINION_PROVIDER", "groq")
     if provider_name not in _PROVIDERS:
         raise ValueError(
             f"Unknown SIGNAL_OPINION_PROVIDER '{provider_name}'. "
