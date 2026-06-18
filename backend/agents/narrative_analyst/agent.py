@@ -160,6 +160,70 @@ def _format_band_report(radar: dict, brief: dict) -> str:
     )
 
 
+def _parse_tickers(tickers: str) -> list[str]:
+    """Parse comma/space separated ticker input into unique uppercase symbols."""
+    cleaned = tickers.replace(",", " ").replace(";", " ")
+    stopwords = {"AND", "OR", "WITH", "VS", "VERSUS", "STOCK", "STOCKS", "TICKER", "TICKERS"}
+    parsed: list[str] = []
+    for token in cleaned.split():
+        symbol = "".join(ch for ch in token.upper() if ch.isalnum() or ch in {".", "-"})
+        if symbol and symbol not in stopwords and symbol not in parsed:
+            parsed.append(symbol)
+    return parsed
+
+
+def _format_multi_band_report(results: list[dict]) -> str:
+    lines = [
+        "## Multi-Stock Narrative Radar",
+        "",
+        "I researched the requested tickers and selected the most relevant follow-up requests for Signal Processing and Latent State.",
+        "",
+    ]
+
+    signal_requests = []
+    latent_requests = []
+
+    for result in results:
+        radar = result["radar"]
+        brief = result["brief"]
+        reliability = radar.get("source_reliability", {})
+        lines.extend(
+            [
+                f"### {radar.get('asset', 'UNKNOWN')}",
+                f"**Summary:** {brief.get('summary', 'No summary generated.')}",
+                f"**Source reliability:** average confidence {reliability.get('average_confidence', 'n/a')}, highest tier {reliability.get('highest_tier', 'n/a')}",
+                f"**Bullish case:** {brief.get('bullish_case', radar.get('bullish_thesis', 'n/a'))}",
+                f"**Bearish case:** {brief.get('bearish_case', radar.get('bearish_thesis', 'n/a'))}",
+                "**Top evidence:**",
+            ]
+        )
+        for article in radar.get("top_articles", [])[:3]:
+            source_reliability = article.get("source_reliability", {})
+            lines.append(
+                f"- {article.get('title', 'Untitled')} "
+                f"({article.get('source', 'Unknown source')}, "
+                f"{source_reliability.get('tier_label', 'Unscored')})"
+            )
+        lines.append("")
+        signal_requests.append(radar.get("signal_request", {}))
+        latent_requests.append(radar.get("latent_request", {}))
+
+    lines.extend(
+        [
+            "## Requests For Signal Processing",
+            "```json",
+            json.dumps(signal_requests, indent=2),
+            "```",
+            "",
+            "## Requests For Latent State",
+            "```json",
+            json.dumps(latent_requests, indent=2),
+            "```",
+        ]
+    )
+    return "\n".join(lines)
+
+
 @tool
 def search_company_news(ticker: str, company_name: str = "", lens: str = "", days_back: int = 14) -> str:
     """
@@ -288,6 +352,64 @@ def build_full_narrative_report(
     })
 
 
+@tool
+def build_multi_ticker_narrative_report(
+    tickers: str,
+    lens: str = "",
+    days_back: int = 14,
+) -> str:
+    """
+    Preferred tool when the user asks about multiple stock tickers.
+
+    Args:
+        tickers: Comma or space separated ticker symbols, e.g. "AAPL, MSFT, NVDA".
+        lens: Optional research lens that applies to the full basket.
+        days_back: Recent-news lookback window.
+
+    Returns a Band-ready multi-stock report plus a list of per-ticker Signal
+    Processing and Latent State requests. After this tool returns, call
+    thenvoi_send_message with the returned 'band_message' value as content.
+    """
+    symbols = _parse_tickers(tickers)
+    if not symbols:
+        return _json_dumps({
+            "error": "No ticker symbols found. Ask the user for one or more stock tickers.",
+        })
+
+    max_tickers = int(os.getenv("NARRATIVE_MAX_TICKERS", "5"))
+    symbols = symbols[:max_tickers]
+
+    results = []
+    for symbol in symbols:
+        articles = fetch_company_news(
+            ticker=symbol,
+            lens=lens or None,
+            days_back=days_back,
+            limit=int(os.getenv("NARRATIVE_MAX_ARTICLES", "25")),
+        )
+        per_ticker_lens = lens or f"Assess whether recent {symbol} news is creating a tradable narrative shift."
+        radar = build_narrative_radar(
+            ticker=symbol,
+            articles=articles,
+            lens=per_ticker_lens,
+        )
+        brief = generate_narrative_brief(radar)
+        results.append({
+            "ticker": symbol,
+            "radar": radar,
+            "brief": brief,
+        })
+
+    band_message = _format_multi_band_report(results)
+    return _json_dumps({
+        "tickers": symbols,
+        "band_message": band_message,
+        "results": results,
+        "signal_requests": [result["radar"].get("signal_request", {}) for result in results],
+        "latent_requests": [result["radar"].get("latent_request", {}) for result in results],
+    })
+
+
 TOOLS = [
     search_company_news,
     fetch_free_yahoo_news,
@@ -295,6 +417,7 @@ TOOLS = [
     score_news_sentiment,
     score_source_reliability_tool,
     build_full_narrative_report,
+    build_multi_ticker_narrative_report,
     build_narrative_radar_tool,
     generate_narrative_brief_tool,
 ]

@@ -68,6 +68,11 @@ first, then call Band's `thenvoi_send_message` tool with the returned
 `band_message`. This avoids fragile multi-step handoff of large article JSON
 between tools.
 
+For multi-stock requests such as `research AAPL, MSFT, and NVDA`, the LLM
+should call `build_multi_ticker_narrative_report`, then call
+`thenvoi_send_message` with the returned `band_message`. The response includes
+separate Signal Processing and Latent State request JSON for each ticker.
+
 If Band returns `401 Unauthorized`, fill in the real `narrative_analyst`
 `agent_id` and `api_key` in `agent_config.yaml`. The example values are
 placeholders and will not connect.
