@@ -253,6 +253,10 @@ async def main():
     agent_id, api_key = load_agent_credentials("narrative_analyst")
     _validate_band_credentials(agent_id, api_key)
     logger.info("Loaded Narrative Analyst agent: %s", agent_id)
+    logger.info("Band REST URL: %s", os.getenv("THENVOI_REST_URL") or os.getenv("BAND_REST_URL"))
+    logger.info("Band WS URL: %s", os.getenv("THENVOI_WS_URL") or os.getenv("BAND_WS_URL"))
+    logger.info("LLM provider: %s", os.getenv("NARRATIVE_LLM_PROVIDER", "featherless"))
+    logger.info("Featherless model: %s", os.getenv("FEATHERLESS_MODEL", "Qwen/Qwen2.5-7B-Instruct"))
 
     adapter = LangGraphAdapter(
         llm=_build_llm(),
@@ -265,11 +269,12 @@ async def main():
         adapter=adapter,
         agent_id=agent_id,
         api_key=api_key,
-        ws_url=os.getenv("THENVOI_WS_URL"),
-        rest_url=os.getenv("THENVOI_REST_URL"),
+        ws_url=os.getenv("THENVOI_WS_URL") or os.getenv("BAND_WS_URL"),
+        rest_url=os.getenv("THENVOI_REST_URL") or os.getenv("BAND_REST_URL"),
     )
 
-    logger.info("Narrative Analyst agent is live. Press Ctrl+C to stop.")
+    logger.info("Starting Band websocket runtime. Keep this terminal open.")
+    logger.info("If a Band mention reaches this process, you will see '[NARRATIVE AGENT] Message received'.")
     await agent.run()
 
 
