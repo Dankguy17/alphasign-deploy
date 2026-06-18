@@ -23,10 +23,11 @@ For each ticker, build a Narrative Radar with:
 
 WORKFLOW
 1. Identify ticker(s), company name hints, and any research lens in the message.
-2. Use search_company_news to gather recent evidence.
-3. Use build_narrative_radar to turn articles into structured hypotheses.
-4. Use generate_narrative_brief for a concise analyst brief.
-5. Send a complete message to the Band room with thenvoi_send_message.
+2. For normal ticker research, call build_full_narrative_report. This is the preferred path because it fetches news, builds the radar, scores source reliability, and creates a Band-ready message in one tool call.
+3. Read the build_full_narrative_report result and take the exact band_message value.
+4. Your final action MUST be thenvoi_send_message with content set to that exact band_message value.
+
+Only use the lower-level tools search_company_news, build_narrative_radar_tool, and generate_narrative_brief_tool when you are debugging or doing a custom multi-step analysis. Do not manually quote or rewrite a large articles_json payload.
 
 WHEN TALKING TO SIGNAL PROCESSING
 Ask for specific windows and metrics. Examples:
@@ -49,6 +50,12 @@ Your final Band message should include:
 
 CRITICAL DELIVERY RULE
 Simply writing your findings as normal final text does not send anything to the Band room. The room only sees content passed to the thenvoi_send_message tool. Your last step must be thenvoi_send_message with the complete write-up in content.
+
+Normal successful pattern:
+1. Call build_full_narrative_report(ticker="AAPL", lens="...")
+2. Call thenvoi_send_message(content=<the exact band_message string returned by build_full_narrative_report>)
+
+Never end your turn with local/plain text only. Never pass malformed, hand-assembled article JSON between tools.
 
 If there is not enough information to identify a ticker, ask for clarification through thenvoi_send_message.
 """

@@ -73,6 +73,93 @@ def _validate_band_credentials(agent_id: str, api_key: str) -> None:
         )
 
 
+def _json_dumps(data: object) -> str:
+    return json.dumps(data, ensure_ascii=True)
+
+
+def _load_json_dict(value: str) -> dict:
+    try:
+        payload = json.loads(value)
+        return payload if isinstance(payload, dict) else {}
+    except json.JSONDecodeError:
+        return {}
+
+
+def _parse_articles_payload(value: str) -> tuple[list[dict], str | None]:
+    """
+    Parse article payloads without crashing the whole Band execution.
+
+    LLMs sometimes try to pass the displayed output of search_company_news as a
+    manually quoted string, which can produce invalid JSON. In that case return
+    a tool-readable error instead of raising and marking the Band message failed.
+    """
+    try:
+        payload = json.loads(value)
+    except json.JSONDecodeError as exc:
+        return [], (
+            "Invalid articles_json. Do not manually quote or rewrite article JSON. "
+            "Use build_full_narrative_report for normal ticker research, or pass "
+            f"the exact raw output from search_company_news. JSON error: {exc}"
+        )
+
+    if isinstance(payload, dict):
+        articles = payload.get("articles", [])
+    elif isinstance(payload, list):
+        articles = payload
+    else:
+        return [], "articles_json must decode to a dict with 'articles' or a list of article objects."
+
+    if not isinstance(articles, list):
+        return [], "The 'articles' field must be a list."
+
+    return [article for article in articles if isinstance(article, dict)], None
+
+
+def _format_band_report(radar: dict, brief: dict) -> str:
+    top_articles = radar.get("top_articles", [])[:5]
+    article_lines = []
+    for idx, article in enumerate(top_articles, start=1):
+        reliability = article.get("source_reliability", {})
+        article_lines.append(
+            f"{idx}. {article.get('title', 'Untitled')} "
+            f"({article.get('source', 'Unknown source')}, "
+            f"{reliability.get('tier_label', 'Unscored')}, "
+            f"confidence {reliability.get('confidence', 'n/a')})"
+        )
+
+    reliability_summary = radar.get("source_reliability", {})
+    signal_request = json.dumps(radar.get("signal_request", {}), indent=2)
+    latent_request = json.dumps(radar.get("latent_request", {}), indent=2)
+
+    return "\n".join(
+        [
+            f"## Narrative Radar: {radar.get('asset', 'UNKNOWN')}",
+            "",
+            f"**Summary:** {brief.get('summary', 'No summary generated.')}",
+            "",
+            "**Top Evidence:**",
+            *(article_lines or ["No focused articles found."]),
+            "",
+            "**Source Reliability:**",
+            f"- Average confidence: {reliability_summary.get('average_confidence', 'n/a')}",
+            f"- Highest tier: {reliability_summary.get('highest_tier', 'n/a')}",
+            f"- Tier counts: {reliability_summary.get('tier_counts', {})}",
+            "",
+            f"**Bullish case:** {brief.get('bullish_case', radar.get('bullish_thesis', 'n/a'))}",
+            f"**Bearish case:** {brief.get('bearish_case', radar.get('bearish_thesis', 'n/a'))}",
+            "",
+            "**Risk flags:**",
+            *[f"- {flag}" for flag in radar.get("risk_flags", [])],
+            "",
+            "**Signal Processing request:**",
+            f"```json\n{signal_request}\n```",
+            "",
+            "**Latent State request:**",
+            f"```json\n{latent_request}\n```",
+        ]
+    )
+
+
 @tool
 def search_company_news(ticker: str, company_name: str = "", lens: str = "", days_back: int = 14) -> str:
     """
@@ -88,7 +175,7 @@ def search_company_news(ticker: str, company_name: str = "", lens: str = "", day
         days_back=days_back,
         limit=int(os.getenv("NARRATIVE_MAX_ARTICLES", "25")),
     )
-    return json.dumps({"ticker": ticker.upper(), "article_count": len(articles), "articles": articles})
+    return _json_dumps({"ticker": ticker.upper(), "article_count": len(articles), "articles": articles})
 
 
 @tool
@@ -99,7 +186,7 @@ def fetch_free_yahoo_news(ticker: str) -> str:
     articles = []
     articles.extend(fetch_yahoo_rss_news(ticker, limit=15))
     articles.extend(fetch_yfinance_news(ticker, limit=15))
-    return json.dumps({"ticker": ticker.upper(), "article_count": len(articles), "articles": articles})
+    return _json_dumps({"ticker": ticker.upper(), "article_count": len(articles), "articles": articles})
 
 
 @tool
@@ -107,7 +194,7 @@ def extract_article_text_tool(url: str, max_chars: int = 4000) -> str:
     """
     Extract readable text from a news article URL for deeper analysis.
     """
-    return json.dumps(extract_article_text(url, max_chars=max_chars))
+    return _json_dumps(extract_article_text(url, max_chars=max_chars))
 
 
 @tool
@@ -116,7 +203,7 @@ def score_news_sentiment(text: str) -> str:
     Score text with a free local financial sentiment heuristic.
     Returns label, numeric score, and driver terms.
     """
-    return json.dumps(score_text_sentiment(text))
+    return _json_dumps(score_text_sentiment(text))
 
 
 @tool
@@ -126,7 +213,12 @@ def score_source_reliability_tool(article_json: str) -> str:
 
     Returns tier, confidence, source_type, and reason.
     """
-    return json.dumps(score_source_reliability(json.loads(article_json)))
+    article = _load_json_dict(article_json)
+    if not article:
+        return _json_dumps({
+            "error": "Invalid article_json. Pass one article object as valid JSON.",
+        })
+    return _json_dumps(score_source_reliability(article))
 
 
 @tool
@@ -137,13 +229,11 @@ def build_narrative_radar_tool(ticker: str, articles_json: str, lens: str = "") 
     articles_json can be either a raw JSON list or the direct output from
     search_company_news / fetch_free_yahoo_news.
     """
-    payload = json.loads(articles_json)
-    if isinstance(payload, dict):
-        articles = payload.get("articles", [])
-    else:
-        articles = payload
+    articles, error = _parse_articles_payload(articles_json)
+    if error:
+        return _json_dumps({"error": error})
     radar = build_narrative_radar(ticker=ticker, articles=articles, lens=lens or None)
-    return json.dumps(radar)
+    return _json_dumps(radar)
 
 
 @tool
@@ -154,8 +244,48 @@ def generate_narrative_brief_tool(radar_json: str) -> str:
     Uses Featherless/AI-ML API if configured; otherwise returns a deterministic
     no-LLM brief.
     """
-    radar = json.loads(radar_json)
-    return json.dumps(generate_narrative_brief(radar))
+    radar = _load_json_dict(radar_json)
+    if not radar:
+        return _json_dumps({"error": "Invalid radar_json. Pass a valid Narrative Radar JSON object."})
+    return _json_dumps(generate_narrative_brief(radar))
+
+
+@tool
+def build_full_narrative_report(
+    ticker: str,
+    company_name: str = "",
+    lens: str = "",
+    days_back: int = 14,
+) -> str:
+    """
+    Preferred tool for normal ticker research.
+
+    Fetches focused news, scores source reliability, builds the Narrative Radar,
+    creates the analyst brief, and returns a complete Band-ready message.
+
+    After this tool returns, call thenvoi_send_message with the returned
+    'band_message' value as the content. Do not rewrite article JSON manually.
+    """
+    articles = fetch_company_news(
+        ticker=ticker,
+        company_name=company_name or None,
+        lens=lens or None,
+        days_back=days_back,
+        limit=int(os.getenv("NARRATIVE_MAX_ARTICLES", "25")),
+    )
+    radar = build_narrative_radar(
+        ticker=ticker,
+        articles=articles,
+        lens=lens or None,
+    )
+    brief = generate_narrative_brief(radar)
+    band_message = _format_band_report(radar, brief)
+    return _json_dumps({
+        "ticker": ticker.upper(),
+        "band_message": band_message,
+        "radar": radar,
+        "brief": brief,
+    })
 
 
 TOOLS = [
@@ -164,6 +294,7 @@ TOOLS = [
     extract_article_text_tool,
     score_news_sentiment,
     score_source_reliability_tool,
+    build_full_narrative_report,
     build_narrative_radar_tool,
     generate_narrative_brief_tool,
 ]

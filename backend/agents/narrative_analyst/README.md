@@ -63,6 +63,11 @@ Run the Band-connected agent:
 python -m agents.narrative_analyst.agent
 ```
 
+For normal Band messages, the LLM should call `build_full_narrative_report`
+first, then call Band's `thenvoi_send_message` tool with the returned
+`band_message`. This avoids fragile multi-step handoff of large article JSON
+between tools.
+
 If Band returns `401 Unauthorized`, fill in the real `narrative_analyst`
 `agent_id` and `api_key` in `agent_config.yaml`. The example values are
 placeholders and will not connect.
