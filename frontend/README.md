@@ -47,7 +47,7 @@ The frontend talks to the backend adapter through the Next.js route handler in:
 
 That proxy forwards requests to the adapter at:
 
-`http://localhost:8765`
+`https://server.alphasign.trade`
 
 unless `ALPHASIGN_API_URL` or `NEXT_PUBLIC_ALPHASIGN_API_URL` is set.
 
@@ -101,7 +101,7 @@ The frontend understands the following environment variables:
 - `NEXT_PUBLIC_ALPHASIGN_API_URL`
   - client-side base URL for browser fetches and EventSource
 
-If neither is set, the app defaults to `http://localhost:8765`.
+If neither is set, the app defaults to `https://server.alphasign.trade`.
 For production, both values should usually point at the same Cloudflare Tunnel
 hostname or other public backend URL.
 

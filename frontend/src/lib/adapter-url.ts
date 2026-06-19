@@ -1,6 +1,7 @@
 const COOKIE_NAME = "alphasign.adapter_url";
 const DEFAULT_URL =
-  process.env.NEXT_PUBLIC_ALPHASIGN_API_URL?.replace(/\/$/, "") ?? "http://localhost:8765";
+  process.env.NEXT_PUBLIC_ALPHASIGN_API_URL?.replace(/\/$/, "") ??
+  "https://server.alphasign.trade";
 
 function normalizeUrl(value: string) {
   const normalized = value.trim().replace(/\/$/, "");

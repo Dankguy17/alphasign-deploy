@@ -349,7 +349,7 @@ export function AppShell() {
                   <input
                     value={adapterUrlInput}
                     onChange={(event) => setAdapterUrlInput(event.target.value)}
-                    placeholder="http://localhost:8765"
+                    placeholder="https://server.alphasign.trade"
                     className="mt-2 h-10 w-full rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-2)] px-3 font-mono text-xs text-[var(--ink)] placeholder:text-[var(--ink-tertiary)]"
                   />
                   <p className="mt-2 text-[11px] leading-5 text-[var(--ink-subtle)]">

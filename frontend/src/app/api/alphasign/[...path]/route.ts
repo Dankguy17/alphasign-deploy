@@ -4,7 +4,7 @@ import { readAdapterUrlCookie } from "@/lib/adapter-url";
 const defaultAdapterBaseUrl =
   process.env.ALPHASIGN_API_URL?.replace(/\/$/, "") ??
   process.env.NEXT_PUBLIC_ALPHASIGN_API_URL?.replace(/\/$/, "") ??
-  "http://localhost:8765";
+  "https://server.alphasign.trade";
 
 type RouteContext = {
   params: Promise<{ path: string[] }>;
