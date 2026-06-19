@@ -436,7 +436,7 @@ export function AppShell() {
               onSelect={setSelected}
             />
           ) : null}
-          {messages.length > 0 || cards.length > 0 || reportReady ? (
+          {showWorkflow || analysisRunning || messages.length > 0 || cards.length > 0 || reportReady ? (
             <AnimatedContent
               distance={100}
               direction="vertical"
@@ -463,21 +463,9 @@ export function AppShell() {
 
         <aside className="space-y-6">
           {reportReady ? (
-            <AnimatedContent
-              distance={100}
-              direction="vertical"
-              reverse={false}
-              duration={1.6}
-              ease="power3.out"
-              initialOpacity={0}
-              animateOpacity
-              scale={0.7}
-              threshold={0.4}
-              delay={0}
-              animateLayout
-            >
+            <div className="dashboard-fade-in dashboard-fade-in--late">
               <ReportPanel reportTs={reportTs} />
-            </AnimatedContent>
+            </div>
           ) : null}
           {messages.length > 0 || reportReady ? (
             <AnimatedContent

@@ -92,7 +92,7 @@ body {
 .ticker-intro-content h1 { color: white; font-size: clamp(64px, 11vw, 118px); font-weight: 650; letter-spacing: -.065em; line-height: .9; text-shadow: 0 8px 44px rgba(0,0,0,.5); }
 .brand-logo { filter: grayscale(1) brightness(0) invert(1); }
 .ticker-intro-title { display: flex; align-items: center; justify-content: center; }
-.ticker-intro-logo { width: .82em; height: .82em; margin-right: -.06em; object-fit: contain; filter: grayscale(1) brightness(0) invert(1) drop-shadow(0 8px 44px rgba(0,0,0,.5)); }
+.ticker-intro-logo { width: 1.63em; height: 1.63em; margin: -.32em -.2em -.27em -.25em; object-fit: contain; transform: translate(22px, .05em); filter: grayscale(1) brightness(0) invert(1) drop-shadow(0 8px 44px rgba(0,0,0,.5)); }
 .ticker-intro-copy { margin-top: 24px; color: rgba(255,255,255,.64); font-size: clamp(15px, 2vw, 18px); }
 .ticker-intro-form { display: flex; width: min(100%, 440px); margin: 34px auto 0; padding: 6px; border: 1px solid rgba(255,255,255,.18); border-radius: 16px; background: rgba(28,28,32,.78); box-shadow: inset 0 1px rgba(255,255,255,.08), 0 18px 60px rgba(0,0,0,.34); backdrop-filter: blur(18px); }
 .ticker-intro-form input { min-width: 0; flex: 1; height: 50px; padding: 0 16px; border: 0; outline: 0; background: transparent; color: white; font-family: var(--font-mono); font-size: 15px; text-transform: uppercase; }
@@ -105,6 +105,14 @@ body {
 .dashboard-skeleton-header { display: flex; height: 64px; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--hairline); }
 .dashboard-skeleton-grid { display: grid; gap: 24px; padding-top: 28px; grid-template-columns: minmax(0,1fr) 24rem; }
 .dashboard-enter { animation: dashboard-enter 550ms cubic-bezier(.22,.8,.22,1) both; }
+.dashboard-fade-in {
+  opacity: 0;
+  transform: translateY(14px) scale(.985);
+  animation: dashboard-fade-in 620ms cubic-bezier(.22,.8,.22,1) both;
+}
+.dashboard-fade-in--late {
+  animation-delay: 180ms;
+}
 .analyze-button { animation: analyze-control-in 240ms ease both; }
 .analysis-progress {
   position: relative;
@@ -125,12 +133,21 @@ body {
 .analysis-run-track span { position: absolute; inset-block: 0; left: 0; border-radius: inherit; background: linear-gradient(90deg, var(--primary), var(--primary-hover)); box-shadow: 0 0 14px rgba(130,143,255,.45); transition: width 650ms cubic-bezier(.22,.8,.22,1); }
 @keyframes skeleton-stage-in { from { opacity: 0; transform: translateY(12px); } }
 @keyframes dashboard-enter { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
+@keyframes dashboard-fade-in { to { opacity: 1; transform: none; } }
 @keyframes analyze-control-in { from { opacity: 0; transform: scaleX(.8); } }
 @keyframes progress-morph-in { from { width: 86px; opacity: .25; transform: scaleX(.7); } }
 @keyframes analysis-progress { from { transform: translateX(-110%); } to { transform: translateX(230%); } }
 @keyframes analysis-status-in { from { opacity: 0; transform: translateY(6px); } }
 @media (max-width: 1023px) { .dashboard-skeleton-grid { grid-template-columns: 1fr; } .dashboard-skeleton-grid > div:last-child { display: none; } }
-@media (prefers-reduced-motion: reduce) { .ticker-intro, .dashboard-enter, .dashboard-skeleton { animation: none; transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .ticker-intro,
+  .dashboard-enter,
+  .dashboard-fade-in,
+  .dashboard-skeleton {
+    animation: none;
+    transition: none;
+  }
+}
 
 /* Subtle living gradient behind the whole app — slow-drifting lavender
    aurora at low opacity. Stays minimal; panels paint solid on top. */
