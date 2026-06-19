@@ -20,16 +20,12 @@ services:
     container_name: alphasign-cloudflared
     depends_on:
       - alphasign-backend
-    entrypoint: ["/bin/sh", "-c"]
-    command: |
-      if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
-        exec cloudflared tunnel --no-autoupdate run --token "$CLOUDFLARE_TUNNEL_TOKEN"
-      else
-        echo "CLOUDFLARE_TUNNEL_TOKEN is not set; cloudflared will stay idle."
-        tail -f /dev/null
-      fi
-    environment:
-      CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    command:
+      - tunnel
+      - --no-autoupdate
+      - run
+      - --token
+      - ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in the stack environment}
     restart: unless-stopped
 
 volumes:
