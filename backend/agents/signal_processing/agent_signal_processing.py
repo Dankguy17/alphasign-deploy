@@ -69,7 +69,7 @@ from typing import Any, Callable
 
 from thenvoi import Agent
 from thenvoi.adapters import LangGraphAdapter
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.rate_limiters import InMemoryRateLimiter
@@ -104,6 +104,10 @@ DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 DEFAULT_FEATHERLESS_BASE_URL = "https://api.featherless.ai/v1"
 DEFAULT_DEEPSEEK_MODEL = "deepseek-ai/DeepSeek-V4-Pro"
 SIGNAL_DEBUG = os.getenv("SIGNAL_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+SIGNAL_MAX_TOOL_ROUNDS = int(os.getenv("SIGNAL_MAX_TOOL_ROUNDS", "6"))
+
+if SIGNAL_MAX_TOOL_ROUNDS < 1:
+    raise ValueError("SIGNAL_MAX_TOOL_ROUNDS must be at least 1.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -521,13 +525,15 @@ _TOOL_ALIASES = {
 }
 
 
-def _repair_tool_calls_hook(tool_names: set[str]):
+def _tool_control_hook(llm: ChatOpenAI, tool_names: set[str], max_tool_rounds: int):
     """
     Some OpenAI-compatible providers return tool calls without LangChain's
-    required call id. Fill those ids before ToolNode validation runs.
+    required call id. Fill those ids before ToolNode validation runs. Also
+    stop unbounded ReAct loops by replacing a tool call with a tool-disabled
+    synthesis response after ``max_tool_rounds`` completed tool rounds.
     """
 
-    def repair_tool_calls(state: dict[str, Any]) -> dict[str, list[AIMessage]]:
+    async def control_tool_calls(state: dict[str, Any]) -> dict[str, list[AIMessage]]:
         messages = state.get("messages", [])
         if not messages:
             return {}
@@ -535,6 +541,57 @@ def _repair_tool_calls_hook(tool_names: set[str]):
         last_message = messages[-1]
         if not isinstance(last_message, AIMessage) or not last_message.tool_calls:
             return {}
+
+        # The checkpointer retains older room messages. Count only tool rounds
+        # after the newest user message so the budget resets for each response.
+        latest_user_index = max(
+            (
+                index
+                for index, message in enumerate(messages[:-1])
+                if isinstance(message, HumanMessage)
+            ),
+            default=-1,
+        )
+        completed_tool_rounds = sum(
+            1
+            for message in messages[latest_user_index + 1 : -1]
+            if isinstance(message, AIMessage) and message.tool_calls
+        )
+        if completed_tool_rounds >= max_tool_rounds:
+            logger.warning(
+                "Signal Processing reached its %d-round tool budget; "
+                "forcing final-response synthesis.",
+                max_tool_rounds,
+            )
+            synthesis_messages = [
+                *messages[:-1],
+                HumanMessage(
+                    content=(
+                        "The tool-call budget is exhausted. Using only the tool results "
+                        "already present above, write the complete final Signal Processing "
+                        "response now. Do not request or describe any additional tool calls. "
+                        "Clearly state any data limitation caused by the budget."
+                    )
+                ),
+            ]
+            response = await llm.ainvoke(synthesis_messages)
+            content = getattr(response, "content", None)
+            if not content:
+                content = (
+                    "Signal Processing could not synthesize a final report within its "
+                    "configured tool-call budget. The available tool results are incomplete."
+                )
+
+            # Keep the same id so LangGraph's add_messages reducer replaces the
+            # pending tool-call message instead of appending an orphaned one.
+            return {
+                "messages": [
+                    AIMessage(
+                        content=content,
+                        id=last_message.id or f"tool-budget-message-{uuid.uuid4().hex}",
+                    )
+                ]
+            }
 
         repaired_calls: list[dict[str, Any]] = []
         changed = False
@@ -585,7 +642,7 @@ def _repair_tool_calls_hook(tool_names: set[str]):
             ]
         }
 
-    return repair_tool_calls
+    return control_tool_calls
 
 
 def _build_graph_factory(llm: ChatOpenAI, checkpointer: InMemorySaver):
@@ -597,7 +654,11 @@ def _build_graph_factory(llm: ChatOpenAI, checkpointer: InMemorySaver):
             model=llm,
             tools=all_tools,
             checkpointer=checkpointer,
-            post_model_hook=_repair_tool_calls_hook(tool_names),
+            post_model_hook=_tool_control_hook(
+                llm,
+                tool_names,
+                SIGNAL_MAX_TOOL_ROUNDS,
+            ),
         )
 
     return graph_factory

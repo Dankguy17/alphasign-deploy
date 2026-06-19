@@ -16,6 +16,7 @@ out/
 
 # Outputs
 backend/outputs/
+backend/alphasign_conversation.txt
 *.pdf
 
 # OS
@@ -34,4 +35,3 @@ backend/uv.lock
 AGENTS.md
 frontend/AGENTS.md
 frontend/AGENTS 2.md
-

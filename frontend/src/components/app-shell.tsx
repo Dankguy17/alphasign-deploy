@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { FormEvent, useState } from "react";
 import { AgentGraph } from "@/components/agent-graph";
 import { AgentLanes } from "@/components/agent-lanes";
 import { MessageStream } from "@/components/message-stream";
@@ -13,6 +13,8 @@ export function AppShell() {
     useAlphaSignStream();
   const [selected, setSelected] = useState<AgentId | "all">("all");
   const [resetting, setResetting] = useState(false);
+  const [tickerInput, setTickerInput] = useState("");
+  const [ticker, setTicker] = useState<string | null>(null);
 
   const activeAgent: AgentId | null =
     messages.length > 0 ? messages[messages.length - 1].agent : null;
@@ -27,6 +29,14 @@ export function AppShell() {
     } finally {
       setResetting(false);
     }
+  }
+
+  function handleTickerSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const normalized = tickerInput.trim().toUpperCase();
+    if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) return;
+    setTicker(normalized);
+    setTickerInput(normalized);
   }
 
   return (
@@ -64,6 +74,44 @@ export function AppShell() {
 
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-7 sm:px-6 lg:grid-cols-[minmax(0,1fr)_24rem] lg:px-8">
         <div className="space-y-6">
+          <section className="panel p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <p className="eyebrow">Research target</p>
+                <h2 className="panel-title mt-1.5">
+                  {ticker ? `Tracking ${ticker}` : "Enter a stock ticker"}
+                </h2>
+                <p className="panel-sub mt-1.5">
+                  Set the ticker you want to follow in this observation session.
+                </p>
+              </div>
+              <form
+                className="flex w-full gap-2 sm:w-auto"
+                onSubmit={handleTickerSubmit}
+              >
+                <label className="sr-only" htmlFor="ticker">
+                  Stock ticker
+                </label>
+                <input
+                  id="ticker"
+                  name="ticker"
+                  value={tickerInput}
+                  onChange={(event) => setTickerInput(event.target.value.toUpperCase())}
+                  placeholder="AAPL"
+                  maxLength={10}
+                  autoComplete="off"
+                  spellCheck={false}
+                  pattern="[A-Za-z][A-Za-z0-9.-]{0,9}"
+                  title="Enter a ticker such as AAPL or BRK.B"
+                  className="h-10 min-w-0 flex-1 rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-2)] px-3 font-mono text-sm font-medium uppercase text-[var(--ink)] placeholder:text-[var(--ink-tertiary)] focus:border-[var(--primary-focus)] sm:w-40"
+                />
+                <button type="submit" className="btn-primary h-10 px-4 text-sm">
+                  Set ticker
+                </button>
+              </form>
+            </div>
+          </section>
+
           {error ? (
             <div className="panel overflow-hidden">
               <div className="border-l-2 border-[var(--warning)] p-4">
