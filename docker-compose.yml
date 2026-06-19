@@ -23,14 +23,13 @@ services:
     command: >
       sh -c '
         if [ -n "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
-          exec cloudflared tunnel --no-autoupdate run
+          exec cloudflared tunnel --no-autoupdate run --token "$CLOUDFLARE_TUNNEL_TOKEN"
         else
           echo "CLOUDFLARE_TUNNEL_TOKEN is not set; cloudflared will stay idle."
           tail -f /dev/null
         fi
       '
     environment:
-      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
       CLOUDFLARE_TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
     restart: unless-stopped
 
