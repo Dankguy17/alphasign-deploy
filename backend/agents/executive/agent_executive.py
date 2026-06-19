@@ -127,22 +127,40 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
     Convert the Executive LLM output to a styled PDF using reportlab.
     Returns the raw PDF bytes AND writes to output_path.
     """
+    import re
+    from xml.sax.saxutils import escape
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     from reportlab.lib import colors
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, HRFlowable, PageBreak,
+        SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, KeepTogether,
     )
     from reportlab.lib.enums import TA_LEFT, TA_CENTER
+
+    # Keep these values in sync with frontend/src/app/globals.css. ReportLab
+    # renders in print/PDF color space, so translucent web colors are replaced
+    # with visually equivalent solid colors.
+    palette = {
+        "canvas": colors.HexColor("#010102"),
+        "surface_1": colors.HexColor("#0f1011"),
+        "surface_2": colors.HexColor("#141516"),
+        "hairline": colors.HexColor("#34343a"),
+        "ink": colors.HexColor("#f7f8f8"),
+        "muted": colors.HexColor("#d0d6e0"),
+        "subtle": colors.HexColor("#8a8f98"),
+        "tertiary": colors.HexColor("#62666d"),
+        "primary": colors.HexColor("#5e6ad2"),
+        "primary_hover": colors.HexColor("#828fff"),
+    }
 
     doc = SimpleDocTemplate(
         output_path,
         pagesize=letter,
-        leftMargin=0.9 * inch,
-        rightMargin=0.9 * inch,
-        topMargin=1.0 * inch,
-        bottomMargin=1.0 * inch,
+        leftMargin=0.62 * inch,
+        rightMargin=0.62 * inch,
+        topMargin=0.68 * inch,
+        bottomMargin=0.62 * inch,
     )
 
     base_styles = getSampleStyleSheet()
@@ -152,28 +170,30 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
         "cover_title": ParagraphStyle(
             "cover_title",
             parent=base_styles["Title"],
-            fontSize=26,
-            leading=32,
-            textColor=colors.HexColor("#0d1b2a"),
-            alignment=TA_CENTER,
-            spaceAfter=6,
+            fontName="Helvetica-Bold",
+            fontSize=32,
+            leading=36,
+            textColor=palette["ink"],
+            alignment=TA_LEFT,
+            spaceAfter=8,
         ),
         "cover_sub": ParagraphStyle(
             "cover_sub",
             parent=base_styles["Normal"],
             fontSize=11,
-            textColor=colors.HexColor("#4a6fa5"),
-            alignment=TA_CENTER,
-            spaceAfter=24,
+            leading=16,
+            textColor=palette["subtle"],
+            alignment=TA_LEFT,
+            spaceAfter=5,
         ),
         "section_heading": ParagraphStyle(
             "section_heading",
             parent=base_styles["Heading1"],
-            fontSize=13,
+            fontName="Helvetica-Bold",
+            fontSize=14,
             leading=18,
-            textColor=colors.HexColor("#0d1b2a"),
-            spaceBefore=18,
-            spaceAfter=6,
+            textColor=palette["ink"],
+            spaceAfter=0,
             borderPad=0,
         ),
         "body": ParagraphStyle(
@@ -181,8 +201,8 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
             parent=base_styles["Normal"],
             fontSize=10,
             leading=15,
-            textColor=colors.HexColor("#222222"),
-            spaceAfter=8,
+            textColor=palette["muted"],
+            spaceAfter=7,
             alignment=TA_LEFT,
         ),
         "bullet": ParagraphStyle(
@@ -190,7 +210,7 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
             parent=base_styles["Normal"],
             fontSize=10,
             leading=14,
-            textColor=colors.HexColor("#222222"),
+            textColor=palette["muted"],
             leftIndent=18,
             bulletIndent=6,
             spaceAfter=4,
@@ -200,7 +220,7 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
             parent=base_styles["Normal"],
             fontSize=10,
             leading=14,
-            textColor=colors.HexColor("#222222"),
+            textColor=palette["muted"],
             leftIndent=18,
             bulletIndent=6,
             spaceAfter=4,
@@ -208,9 +228,19 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
         "footer": ParagraphStyle(
             "footer",
             parent=base_styles["Normal"],
-            fontSize=8,
-            textColor=colors.HexColor("#888888"),
+            fontSize=7.5,
+            leading=11,
+            textColor=palette["tertiary"],
             alignment=TA_CENTER,
+        ),
+        "eyebrow": ParagraphStyle(
+            "eyebrow", parent=base_styles["Normal"], fontName="Helvetica-Bold",
+            fontSize=8, leading=10, textColor=palette["primary_hover"],
+            spaceAfter=10,
+        ),
+        "page_number": ParagraphStyle(
+            "page_number", parent=base_styles["Normal"], fontName="Helvetica",
+            fontSize=7, textColor=palette["tertiary"], alignment=TA_CENTER,
         ),
     }
 
@@ -218,12 +248,12 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
     ts_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
 
     # ── Cover ──────────────────────────────────────────────────────────────
-    story.append(Spacer(1, 0.5 * inch))
+    story.append(Spacer(1, 0.38 * inch))
+    story.append(Paragraph("ALPHASIGN / EXECUTIVE INTELLIGENCE", styles["eyebrow"]))
     story.append(Paragraph("AlphaSign", styles["cover_title"]))
     story.append(Paragraph("Executive Intelligence Report", styles["cover_sub"]))
-    story.append(Paragraph(f"Generated: {ts_str}", styles["cover_sub"]))
-    story.append(HRFlowable(width="100%", thickness=1, color=colors.HexColor("#4a6fa5")))
-    story.append(Spacer(1, 0.3 * inch))
+    story.append(Paragraph(f"Generated {ts_str}", styles["cover_sub"]))
+    story.append(Spacer(1, 0.32 * inch))
 
     # ── Body: parse section headers and body text ─────────────────────────
     # Sections start with "## <Title>"; everything else is body text.
@@ -236,55 +266,100 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
         *,
         bullet_text: str | None = None,
     ) -> Paragraph:
-        # Escape ampersands and angle brackets for ReportLab XML
-        safe = (
-            text.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-        )
+        safe = escape(text)
+        # Preserve the small amount of Markdown emphasis commonly returned by
+        # the executive model without allowing arbitrary ReportLab markup.
+        safe = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", safe)
         return Paragraph(safe, styles[style_key], bulletText=bullet_text)
 
+    sections: list[tuple[str, list[tuple[str, str]]]] = []
+    heading = "Executive Brief"
+    content: list[tuple[str, str]] = []
     for raw_line in report_text.splitlines():
         line = raw_line.strip()
         if not line:
-            story.append(Spacer(1, 4))
+            if content and content[-1][0] != "space":
+                content.append(("space", ""))
             continue
-
         if line.startswith("## "):
-            heading = line[3:].strip()
-            story.append(HRFlowable(
-                width="100%", thickness=0.5,
-                color=colors.HexColor("#cccccc"), spaceAfter=2,
-            ))
-            story.append(_para(heading, "section_heading"))
-
+            if content:
+                sections.append((heading, content))
+            heading, content = line[3:].strip(), []
         elif line.startswith(("- ", "* ", "• ")):
-            content = line[2:].strip()
-            story.append(_para(content, "bullet", bullet_text="•"))
-
-        elif len(line) > 2 and line[0].isdigit() and line[1] in ".)" and line[2] == " ":
-            story.append(_para(line, "number"))
-
+            content.append(("bullet", line[2:].strip()))
+        elif re.match(r"^\d+[.)]\s", line):
+            content.append(("number", line))
         elif line.startswith("---"):
-            story.append(HRFlowable(
-                width="100%", thickness=0.5,
-                color=colors.HexColor("#cccccc"), spaceAfter=6,
-            ))
-
+            continue
         else:
-            story.append(_para(line, "body"))
+            content.append(("body", line))
+    if content:
+        sections.append((heading, content))
+
+    card_width = letter[0] - doc.leftMargin - doc.rightMargin
+    for index, (section_title, items) in enumerate(sections):
+        heading_row = Table(
+            [["", _para(section_title, "section_heading")]],
+            colWidths=[3, card_width - 3 - 26],
+            style=TableStyle([
+                ("BACKGROUND", (0, 0), (0, 0), palette["primary"]),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("LEFTPADDING", (0, 0), (0, 0), 0),
+                ("RIGHTPADDING", (0, 0), (0, 0), 0),
+                ("LEFTPADDING", (1, 0), (1, 0), 10),
+                ("RIGHTPADDING", (1, 0), (1, 0), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]),
+        )
+        body_flowables = []
+        for kind, value in items:
+            if kind == "space":
+                body_flowables.append(Spacer(1, 3))
+            elif kind == "bullet":
+                body_flowables.append(_para(value, "bullet", bullet_text="•"))
+            else:
+                body_flowables.append(_para(value, kind))
+        card = Table(
+            [[heading_row], [body_flowables]],
+            colWidths=[card_width],
+            style=TableStyle([
+                ("BACKGROUND", (0, 0), (-1, -1), palette["surface_1"]),
+                ("BOX", (0, 0), (-1, -1), 0.75, palette["hairline"]),
+                ("LEFTPADDING", (0, 0), (-1, -1), 16),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 16),
+                ("TOPPADDING", (0, 0), (0, 0), 14),
+                ("BOTTOMPADDING", (0, 0), (0, 0), 10),
+                ("TOPPADDING", (0, 1), (0, 1), 3),
+                ("BOTTOMPADDING", (0, 1), (0, 1), 10),
+            ]),
+            splitByRow=1,
+            splitInRow=1,
+        )
+        story.append(KeepTogether([card, Spacer(1, 10)]) if index == 0 else card)
+        story.append(Spacer(1, 10))
 
     # ── Footer note ───────────────────────────────────────────────────────
-    story.append(Spacer(1, 0.4 * inch))
-    story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor("#cccccc")))
-    story.append(Spacer(1, 6))
+    story.append(Spacer(1, 8))
     story.append(_para(
         "This report was generated automatically by AlphaSign. "
         "It is for informational purposes only and does not constitute financial advice.",
         "footer",
     ))
 
-    doc.build(story)
+    def _draw_page(canvas, built_doc):
+        canvas.saveState()
+        canvas.setFillColor(palette["canvas"])
+        canvas.rect(0, 0, letter[0], letter[1], fill=1, stroke=0)
+        # A thin lavender top rail carries the website's single accent color.
+        canvas.setFillColor(palette["primary"])
+        canvas.rect(0, letter[1] - 3, letter[0], 3, fill=1, stroke=0)
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(palette["tertiary"])
+        canvas.drawCentredString(letter[0] / 2, 18, f"ALPHASIGN  /  {built_doc.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_draw_page, onLaterPages=_draw_page)
 
     return Path(output_path).read_bytes()
 

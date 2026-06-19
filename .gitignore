@@ -35,3 +35,7 @@ backend/uv.lock
 AGENTS.md
 frontend/AGENTS.md
 frontend/AGENTS 2.md
+
+#PACKAGE-LOCK.JSON
+
+frontend/package-lock.json
