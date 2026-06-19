@@ -25,6 +25,9 @@ class StartAgent:
         self._latent_id, _ = load_agent_config(
             "latent_state", config_path=config_path
         )
+        # Executive report generation is local. A Band participant is optional
+        # and only added when an ID is explicitly configured.
+        self._executive_id = os.getenv("EXECUTIVE_AGENT_ID", "").strip()
         self._active_room_id: str | None = None
         self._link = ThenvoiLink(
             agent_id=start_agent_id,
@@ -57,11 +60,11 @@ class StartAgent:
         tools = AgentTools("pending", self._link.rest)
         room_id = await tools.create_chatroom()
         tools = AgentTools(room_id, self._link.rest)
-        for agent_id in (self._signal_id, self._narrative_id, self._latent_id):
+        for agent_id in self._room_agent_ids:
             await tools.add_participant(agent_id)
 
         participants = await self._participants(room_id)
-        expected = {self._signal_id, self._narrative_id, self._latent_id}
+        expected = set(self._room_agent_ids)
         present = {str(participant["id"]) for participant in participants}
         missing = expected - present
         if missing:
@@ -80,7 +83,7 @@ class StartAgent:
         present = {str(participant["id"]) for participant in participants}
         tools = AgentTools(target_room_id, self._link.rest, participants=participants)
         removed: list[dict[str, object]] = []
-        for agent_id in (self._signal_id, self._narrative_id, self._latent_id):
+        for agent_id in self._room_agent_ids:
             if agent_id in present:
                 removed.append(await tools.remove_participant(agent_id))
 
@@ -108,11 +111,22 @@ class StartAgent:
         for room in rooms:
             participants = await self._participants(room.id)
             if any(p["id"] == self._narrative_id for p in participants):
+                self._active_room_id = room.id
                 return room.id, participants
-        raise RuntimeError(
-            "No Band room shared by Start Agent and Narrative Analyst was found; "
-            "set BAND_ROOM_ID in backend/.env"
+
+        # A fresh deployment has no shared rooms yet. Create and populate one
+        # instead of requiring a manual trip through the Band dashboard.
+        room = await self.create_room()
+        return str(room["room_id"]), room["participants"]  # type: ignore[return-value]
+
+    @property
+    def _room_agent_ids(self) -> tuple[str, ...]:
+        agent_ids = (
+            self._signal_id,
+            self._narrative_id,
+            self._latent_id,
         )
+        return agent_ids + ((self._executive_id,) if self._executive_id else ())
 
     async def _participants(self, room_id: str) -> list[dict[str, str | None]]:
         response = await self._link.rest.agent_api_participants.list_agent_chat_participants(

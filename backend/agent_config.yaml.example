@@ -24,6 +24,10 @@ latent_state:
   agent_id: "00000000-0000-0000-0000-000000000003"
   api_key: "band_api_key_for_latent_state"
 
+# Executive report generation runs locally and does not require a Band agent.
+# To add an optional Executive participant to each room, set
+# EXECUTIVE_AGENT_ID in .env.
+
 # Band-only initiator. Separate from agents/executive report generation.
 # Handle: @<your band username>/start-agent
 start_agent:

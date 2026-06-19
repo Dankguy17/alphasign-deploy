@@ -230,14 +230,19 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
     # Lines starting with "- " or "* " become bullets.
     # Lines starting with a digit and ". " become numbered items.
 
-    def _para(text: str, style_key: str) -> Paragraph:
+    def _para(
+        text: str,
+        style_key: str,
+        *,
+        bullet_text: str | None = None,
+    ) -> Paragraph:
         # Escape ampersands and angle brackets for ReportLab XML
         safe = (
             text.replace("&", "&amp;")
                 .replace("<", "&lt;")
                 .replace(">", "&gt;")
         )
-        return Paragraph(safe, styles[style_key])
+        return Paragraph(safe, styles[style_key], bulletText=bullet_text)
 
     for raw_line in report_text.splitlines():
         line = raw_line.strip()
@@ -255,7 +260,7 @@ def _render_pdf(report_text: str, output_path: str) -> bytes:
 
         elif line.startswith(("- ", "* ", "• ")):
             content = line[2:].strip()
-            story.append(_para(f"&bull; {content}", "bullet"))
+            story.append(_para(content, "bullet", bullet_text="•"))
 
         elif len(line) > 2 and line[0].isdigit() and line[1] in ".)" and line[2] == " ":
             story.append(_para(line, "number"))

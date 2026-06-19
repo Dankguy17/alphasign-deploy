@@ -225,17 +225,25 @@ class AlphaSignAdapter:
 
     async def _handle_reset(self, request: web.Request) -> web.Response:
         """Clear history and notify subscribers."""
+        self._clear_live_state()
+        return web.json_response({"ok": True})
+
+    def _clear_live_state(self) -> None:
+        """Remove artifacts from the previous session and reset connected clients."""
         self._history.clear()
+        try:
+            PDF_OUTPUT_PATH.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Could not remove stale PDF report at %s", PDF_OUTPUT_PATH)
         reset_event = {"type": "reset", "ts": datetime.now(timezone.utc).isoformat()}
         for q in list(self._subscribers):
             try:
                 q.put_nowait(reset_event)
             except asyncio.QueueFull:
                 pass
-        return web.json_response({"ok": True})
 
     async def _handle_start_session(self, request: web.Request) -> web.Response:
-        if self._send_ticker is None:
+        if self._send_ticker is None or self._create_room is None:
             return web.json_response({"error": "Band kickoff unavailable"}, status=503)
         try:
             payload = await request.json()
@@ -245,12 +253,24 @@ class AlphaSignAdapter:
         if not re.fullmatch(r"[A-Z^][A-Z0-9.^-]{0,14}", ticker):
             return web.json_response({"error": "invalid ticker"}, status=400)
 
+        room_id: str | None = None
         try:
-            room_id = await self._send_ticker(ticker)
+            room = await self._create_room()
+            room_id = str(room["room_id"])
+            await self._send_ticker(ticker)
         except Exception:
-            logger.exception("Could not send Band kickoff for %s", ticker)
-            return web.json_response({"error": "Band kickoff failed"}, status=502)
+            logger.exception("Could not create Band room and send kickoff for %s", ticker)
+            if room_id and self._close_room is not None:
+                try:
+                    await self._close_room(room_id)
+                except Exception:
+                    logger.exception("Could not clean up failed Band room %s", room_id)
+            return web.json_response({"error": "Band room creation or kickoff failed"}, status=502)
 
+        # The room and kickoff now exist, so this is the boundary of a new live
+        # session. Remove the previous report and transcript before publishing
+        # the new session event.
+        self._clear_live_state()
         now = datetime.now(timezone.utc).isoformat()
         event = {
             "type": "session_started",

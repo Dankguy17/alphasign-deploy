@@ -20,7 +20,6 @@ export function AppShell() {
   const [turnsStatus, setTurnsStatus] = useState<string | null>(null);
   const [tickerStatus, setTickerStatus] = useState<string | null>(null);
   const [sendingTicker, setSendingTicker] = useState(false);
-  const [creatingRoom, setCreatingRoom] = useState(false);
   const [roomStatus, setRoomStatus] = useState<string | null>(null);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [closingRoom, setClosingRoom] = useState(false);
@@ -37,6 +36,7 @@ export function AppShell() {
 
   const activeAgent: AgentId | null =
     messages.length > 0 ? messages[messages.length - 1].agent : null;
+  const effectiveRoomId = roomId ?? messages.at(-1)?.room_id ?? null;
 
   async function handleReset() {
     if (!window.confirm("Clear the current session history on the adapter?")) return;
@@ -56,6 +56,7 @@ export function AppShell() {
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) return;
     setSendingTicker(true);
     setTickerStatus(null);
+    setRoomStatus(null);
     try {
       const response = await fetch("/api/alphasign/api/sessions", {
         method: "POST",
@@ -68,7 +69,7 @@ export function AppShell() {
       setRoomClosed(false);
       setTicker(normalized);
       setTickerInput(normalized);
-      setTickerStatus("Sent to Narrative Analyst.");
+      setTickerStatus("New Band room created and sent to Narrative Analyst.");
     } catch (sendError) {
       setTickerStatus(sendError instanceof Error ? sendError.message : "Could not send ticker.");
     } finally {
@@ -76,40 +77,15 @@ export function AppShell() {
     }
   }
 
-  async function handleCreateRoom() {
-    setCreatingRoom(true);
-    setRoomStatus(null);
-    try {
-      const response = await fetch("/api/alphasign/api/rooms", { method: "POST" });
-      const result = (await response.json()) as {
-        room_id?: string;
-        participants?: unknown[];
-        error?: string;
-      };
-      if (!response.ok || !result.room_id) {
-        throw new Error(result.error ?? "Could not create Band room.");
-      }
-      setRoomStatus(
-        `Room ${result.room_id.slice(0, 8)}… ready with ${result.participants?.length ?? 4} participants.`,
-      );
-      setRoomId(result.room_id);
-      setRoomClosed(false);
-    } catch (roomError) {
-      setRoomStatus(roomError instanceof Error ? roomError.message : "Could not create room.");
-    } finally {
-      setCreatingRoom(false);
-    }
-  }
-
   async function handleCloseRoom() {
-    if (!roomId || !window.confirm("Close this Band room and remove its runtime agents?")) return;
+    if (!effectiveRoomId || !window.confirm("Close this Band room and remove its runtime agents?")) return;
     setClosingRoom(true);
     setRoomStatus(null);
     try {
       const response = await fetch("/api/alphasign/api/rooms/close", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ room_id: roomId }),
+        body: JSON.stringify({ room_id: effectiveRoomId }),
       });
       const result = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(result.error ?? "Could not close Band room.");
@@ -164,7 +140,7 @@ export function AppShell() {
                 Report ready
               </span>
             ) : null}
-            {reportReady && roomId && !roomClosed ? (
+            {reportReady && effectiveRoomId && !roomClosed ? (
               <button
                 type="button"
                 onClick={handleCloseRoom}
@@ -196,23 +172,10 @@ export function AppShell() {
                   {ticker ? `Tracking ${ticker}` : "Enter a stock ticker"}
                 </h2>
                 <p className="panel-sub mt-1.5">
-                  Set the ticker you want to follow in this observation session.
+                  Submit a ticker to create a new Band room and begin an observation session.
                 </p>
               </div>
               <div className="flex w-full flex-col gap-2 sm:w-auto">
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleCreateRoom}
-                    disabled={creatingRoom}
-                    className="btn-secondary h-9 px-3 text-xs"
-                  >
-                    {creatingRoom ? "Creating room…" : "Create Band room"}
-                  </button>
-                  {roomStatus ? (
-                    <span className="max-w-64 text-xs text-[var(--ink-subtle)]">{roomStatus}</span>
-                  ) : null}
-                </div>
                 <form className="flex gap-2" onSubmit={handleTickerSubmit}>
                 <label className="sr-only" htmlFor="ticker">
                   Stock ticker
@@ -231,11 +194,14 @@ export function AppShell() {
                   className="h-10 min-w-0 flex-1 rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-2)] px-3 font-mono text-sm font-medium uppercase text-[var(--ink)] placeholder:text-[var(--ink-tertiary)] focus:border-[var(--primary-focus)] sm:w-40"
                 />
                 <button type="submit" disabled={sendingTicker} className="btn-primary h-10 px-4 text-sm">
-                  {sendingTicker ? "Sending…" : "Set ticker"}
+                  {sendingTicker ? "Submitting…" : "Submit"}
                 </button>
                 </form>
                 {tickerStatus ? (
                   <span className="text-xs text-[var(--ink-subtle)]">{tickerStatus}</span>
+                ) : null}
+                {roomStatus ? (
+                  <span className="text-xs text-[var(--ink-subtle)]">{roomStatus}</span>
                 ) : null}
                 <form className="flex items-center gap-2" onSubmit={handleTurnsSubmit}>
                 <label htmlFor="max-turns" className="text-xs text-[var(--ink-subtle)]">
