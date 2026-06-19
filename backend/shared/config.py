@@ -17,6 +17,8 @@ def get_backend_root() -> Path:
 
 
 def _env_key(agent_name: str, suffix: str) -> str:
+    if agent_name.upper().endswith("_AGENT") and suffix == "AGENT_ID":
+        return f"BAND_{agent_name.upper()}_ID"
     return f"BAND_{agent_name.upper()}_{suffix}"
 
 
