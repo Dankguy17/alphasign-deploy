@@ -62,5 +62,6 @@ zstandard==0.25.0
 feedparser
 python-dateutil
 rapidfuzz
+reportlab
 trafilatura
 yfinance

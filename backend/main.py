@@ -40,7 +40,10 @@ load_dotenv(find_dotenv())
 # Local imports
 from adapter import AlphaSignAdapter
 from start_agent import StartAgent
-from agents.executive.agent_executive import generate_executive_report
+from agents.executive.agent_executive import (
+    generate_executive_report,
+    generate_fallback_executive_report,
+)
 from live_protocol import GroqProtocolNormalizer
 
 logging.basicConfig(
@@ -261,6 +264,28 @@ class SessionState:
             logger.info("PDF report written to %s", PDF_OUTPUT_PATH)
         except Exception as exc:
             logger.error("Executive report generation failed: %s", exc, exc_info=True)
+            self.adapter.enqueue({
+                "type": "report_error",
+                "message": str(exc),
+                "ts": datetime.now(timezone.utc).isoformat(),
+            })
+            try:
+                conversation_text = self._log_path.read_text(encoding="utf-8")
+                await asyncio.to_thread(
+                    generate_fallback_executive_report,
+                    conversation_text,
+                    str(PDF_OUTPUT_PATH),
+                    str(exc),
+                )
+                self.adapter.enqueue({
+                    "type": "report_ready",
+                    "path": str(PDF_OUTPUT_PATH),
+                    "fallback": True,
+                    "ts": datetime.now(timezone.utc).isoformat(),
+                })
+                logger.warning("Fallback PDF report written to %s", PDF_OUTPUT_PATH)
+            except Exception:
+                logger.exception("Fallback report generation also failed")
 
 
 # ── Agent launchers ───────────────────────────────────────────────────────────

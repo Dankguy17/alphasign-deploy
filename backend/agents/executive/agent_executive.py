@@ -31,6 +31,7 @@ logger = logging.getLogger("alphasign.executive")
 DEFAULT_GROQ_BASE_URL  = "https://api.groq.com/openai/v1"
 DEFAULT_EXECUTIVE_MODEL = "llama-3.3-70b-versatile"
 EXECUTIVE_MAX_TOKENS    = int(os.getenv("EXECUTIVE_MAX_TOKENS", "4096"))
+EXECUTIVE_TIMEOUT_SECONDS = float(os.getenv("EXECUTIVE_TIMEOUT_SECONDS", "90"))
 
 
 # ── Groq synthesis ────────────────────────────────────────────────────────────
@@ -54,7 +55,12 @@ def _call_groq(conversation_text: str) -> str:
     )
     base_url = os.getenv("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL)
 
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    client = OpenAI(
+        api_key=api_key,
+        base_url=base_url,
+        timeout=EXECUTIVE_TIMEOUT_SECONDS,
+        max_retries=1,
+    )
 
     system_prompt = textwrap.dedent("""
         You are the Executive agent in AlphaSign, a multi-agent financial risk
@@ -461,6 +467,32 @@ def generate_executive_report(conversation_text: str, output_path: str) -> bytes
     pdf_bytes = _render_pdf(report_text, output_path)
     logger.info("Executive: PDF complete (%d bytes).", len(pdf_bytes))
     return pdf_bytes
+
+
+def generate_fallback_executive_report(
+    conversation_text: str, output_path: str, failure_reason: str
+) -> bytes:
+    """Render the collected evidence when LLM synthesis is unavailable."""
+    excerpt = conversation_text[-12000:].strip()
+    report_text = textwrap.dedent(f"""
+        ## Strategy Recommendation
+        HOLD
+        Confidence unavailable. Automated Executive synthesis failed, so no
+        evidence-backed trade recommendation can be issued.
+
+        ## Executive Summary
+        AlphaSign completed the specialist-agent analysis, but Executive report
+        synthesis was unavailable. This fallback preserves the collected evidence
+        for review instead of leaving the session without a report.
+
+        ## Risk Factors
+        - Executive synthesis failure: {failure_reason[:500]}
+        - The transcript below is unsynthesised and requires human review.
+
+        ## Agent Transcript
+        {excerpt}
+    """).strip()
+    return _render_pdf(report_text, output_path)
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
