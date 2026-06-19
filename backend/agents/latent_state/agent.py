@@ -4,15 +4,15 @@ agents/latent_state/agent.py
 The Latent Space agent for AlphaSign.
 
 This agent consumes yfinance/FRED-style data payloads produced by the Signal
-Processing agent, computes one-step Kalman predictions, and asks a Featherless
+Processing agent, computes one-step Kalman predictions, and asks a Groq-hosted
 LLM to summarize the latent state. It intentionally does not fetch market data
 itself; control flow between agents can be added later without changing these
 tools.
 
 Setup:
   1. Add a 'latent_state' block to agent_config.yaml.
-  2. Set FEATHERLESS_API_KEY in backend/.env.
-  3. Optional: set LATENT_STATE_MODEL, default deepseek-ai/DeepSeek-V4-Pro.
+  2. Set GROQ_API_KEY in backend/.env.
+  3. Optional: set LATENT_STATE_MODEL or GROQ_MODEL.
 
 Run:
     cd backend/
@@ -41,6 +41,9 @@ from .opinion import generate_latent_summary
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
 SYSTEM_PROMPT = """You are the Latent Space agent in AlphaSign, a multi-agent
@@ -72,7 +75,7 @@ YOUR RESPONSE back to the Band room must contain:
   - Predicted next value/change/return when applicable
   - Noise variance and latest innovation z-score
   - Whether structural_regime_shift is true
-  - Featherless-generated summary + confidence
+  - Groq-generated summary + confidence
   - A concise conclusion tied to the provided lens
 
 DELIVERING YOUR RESPONSE TO THE ROOM
@@ -133,7 +136,7 @@ def compute_kalman_bundle(bundle_json: str) -> str:
 @tool
 def generate_kalman_summary(kalman_json: str, lens: str = "") -> str:
     """
-    Ask the configured Featherless model to summarize a Kalman prediction
+    Ask the configured Groq model to summarize a Kalman prediction
     result in 2-3 sentences.
 
     Args:
@@ -191,9 +194,9 @@ async def main():
     agent_id, api_key = load_agent_credentials("latent_state")
     logger.info("Loaded Latent Space agent: %s", agent_id)
 
-    featherless_api_key = os.getenv("FEATHERLESS_API_KEY")
-    if not featherless_api_key or featherless_api_key.startswith("your_"):
-        raise RuntimeError("FEATHERLESS_API_KEY is required for the Latent Space agent")
+    groq_api_key = os.getenv("GROQ_API_KEY")
+    if not groq_api_key or groq_api_key.startswith("your_"):
+        raise RuntimeError("GROQ_API_KEY is required for the Latent Space agent")
 
     rate_limiter = InMemoryRateLimiter(
         requests_per_second=0.2,
@@ -201,10 +204,15 @@ async def main():
         max_bucket_size=1,
     )
 
+    model = (
+        os.getenv("LATENT_STATE_MODEL")
+        or os.getenv("GROQ_MODEL")
+        or DEFAULT_GROQ_MODEL
+    )
     llm = ChatOpenAI(
-        api_key=featherless_api_key,
-        model=os.getenv("LATENT_STATE_MODEL", "deepseek-ai/DeepSeek-V4-Pro"),
-        base_url=os.getenv("FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1"),
+        api_key=groq_api_key,
+        model=model,
+        base_url=os.getenv("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
         temperature=0.2,
         rate_limiter=rate_limiter,
         callbacks=[AgentWhiteboxLogger()],
@@ -225,7 +233,7 @@ async def main():
         rest_url=os.getenv("THENVOI_REST_URL"),
     )
 
-    logger.info("Latent Space agent is live. Press Ctrl+C to stop.")
+    logger.info("Latent Space agent is live on Groq model %s. Press Ctrl+C to stop.", model)
     await agent.run()
 
 

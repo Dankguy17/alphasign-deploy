@@ -1,7 +1,7 @@
 """
 agents/latent_state/opinion.py
 
-LLM interpretation layer for Kalman predictions. This module uses Featherless
+LLM interpretation layer for Kalman predictions. This module uses Groq
 via its OpenAI-compatible API because the Latent Space agent is intended to
 reason over filtered state estimates rather than fetch data itself.
 """
@@ -15,6 +15,9 @@ import re
 from dotenv import find_dotenv, load_dotenv
 
 load_dotenv(find_dotenv())
+
+DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
+DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
 
 
 SYSTEM_PROMPT = """You are the Latent Space agent in AlphaSign, a multi-agent
@@ -65,22 +68,26 @@ def _prediction_lines(prediction: dict) -> list[str]:
 
 def generate_latent_summary(kalman_result: dict, lens: str | None = None) -> dict:
     """
-    Generate a short Featherless-written interpretation for a Kalman result.
+    Generate a short Groq-written interpretation for a Kalman result.
 
-    Requires FEATHERLESS_API_KEY. The model can be overridden with
-    LATENT_STATE_MODEL, defaulting to deepseek-ai/DeepSeek-V4-Pro.
+    Requires GROQ_API_KEY. The model can be overridden with LATENT_STATE_MODEL
+    or GROQ_MODEL, defaulting to llama-3.3-70b-versatile.
     """
-    api_key = os.getenv("FEATHERLESS_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key or api_key.startswith("your_"):
-        raise ValueError("FEATHERLESS_API_KEY is required for latent summary generation")
+        raise ValueError("GROQ_API_KEY is required for latent summary generation")
 
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain_openai import ChatOpenAI
 
     llm = ChatOpenAI(
         api_key=api_key,
-        model=os.getenv("LATENT_STATE_MODEL", "deepseek-ai/DeepSeek-V4-Pro"),
-        base_url=os.getenv("FEATHERLESS_BASE_URL", "https://api.featherless.ai/v1"),
+        model=(
+            os.getenv("LATENT_STATE_MODEL")
+            or os.getenv("GROQ_MODEL")
+            or DEFAULT_GROQ_MODEL
+        ),
+        base_url=os.getenv("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
         temperature=0.2,
         max_tokens=300,
     )
