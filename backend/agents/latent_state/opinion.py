@@ -18,6 +18,7 @@ load_dotenv(find_dotenv())
 
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_INCOMPATIBLE_MODEL_PREFIXES = ("deepseek-ai/",)
 
 
 SYSTEM_PROMPT = """You are the Latent Space agent in AlphaSign, a multi-agent
@@ -82,11 +83,7 @@ def generate_latent_summary(kalman_result: dict, lens: str | None = None) -> dic
 
     llm = ChatOpenAI(
         api_key=api_key,
-        model=(
-            os.getenv("LATENT_STATE_MODEL")
-            or os.getenv("GROQ_MODEL")
-            or DEFAULT_GROQ_MODEL
-        ),
+        model=_resolve_groq_model(),
         base_url=os.getenv("GROQ_BASE_URL", DEFAULT_GROQ_BASE_URL),
         temperature=0.2,
         max_tokens=300,
@@ -98,6 +95,22 @@ def generate_latent_summary(kalman_result: dict, lens: str | None = None) -> dic
         ]
     )
     return _parse_response(response.content)
+
+
+def _resolve_groq_model() -> str:
+    model = (
+        os.getenv("LATENT_STATE_MODEL")
+        or os.getenv("GROQ_MODEL")
+        or DEFAULT_GROQ_MODEL
+    )
+    if model.startswith(GROQ_INCOMPATIBLE_MODEL_PREFIXES):
+        raise ValueError(
+            "LATENT_STATE_MODEL/GROQ_MODEL is set to a non-Groq model "
+            f"({model!r}). Latent summary generation uses Groq; unset "
+            "LATENT_STATE_MODEL or set it to a Groq model such as "
+            f"{DEFAULT_GROQ_MODEL!r}."
+        )
+    return model
 
 
 def _parse_response(raw: str) -> dict:

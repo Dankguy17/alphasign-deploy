@@ -25,12 +25,14 @@ import asyncio
 import json
 import logging
 import os
+from typing import Any
 
 from langchain_core.callbacks import BaseCallbackHandler
 from langchain_core.rate_limiters import InMemoryRateLimiter
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.prebuilt import create_react_agent
 from thenvoi import Agent
 from thenvoi.adapters import LangGraphAdapter
 
@@ -44,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_GROQ_BASE_URL = "https://api.groq.com/openai/v1"
 DEFAULT_GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_INCOMPATIBLE_MODEL_PREFIXES = ("deepseek-ai/",)
 
 
 SYSTEM_PROMPT = """You are the Latent Space agent in AlphaSign, a multi-agent
@@ -78,11 +81,10 @@ YOUR RESPONSE back to the Band room must contain:
   - Groq-generated summary + confidence
   - A concise conclusion tied to the provided lens
 
-DELIVERING YOUR RESPONSE TO THE ROOM
-------------------------------------
-The room only sees content passed to the `thenvoi_send_message` tool's
-`content` argument. Your final step must be a call to `thenvoi_send_message`
-with the complete write-up. Do not end with only plain text.
+DELIVERING YOUR RESPONSE
+------------------------
+Return one complete plain-text write-up. Do not call any message-sending tool,
+do not send progress updates, and do not produce more than one final response.
 """
 
 
@@ -190,6 +192,185 @@ class AgentWhiteboxLogger(BaseCallbackHandler):
                     print("No accompanying thenvoi_send_message tool call was detected.")
 
 
+def _build_graph_factory(llm: ChatOpenAI, checkpointer: InMemorySaver):
+    def graph_factory(_thenvoi_tools: list[Any]):
+        return create_react_agent(
+            model=llm,
+            tools=TOOLS,
+            checkpointer=checkpointer,
+        )
+
+    return graph_factory
+
+
+class SingleDeliveryLangGraphAdapter(LangGraphAdapter):
+    """
+    Run local Kalman/summary tools, then publish exactly one final response.
+    """
+
+    async def on_message(
+        self,
+        msg: Any,
+        tools: Any,
+        history: Any,
+        participants_msg: str | None,
+        contacts_msg: str | None,
+        *,
+        is_session_bootstrap: bool,
+        room_id: str,
+    ) -> None:
+        if self._already_processed(msg):
+            logger.info("Skipping duplicate Latent Space message %s", msg.id)
+            return
+
+        if self._is_self_message(msg, tools):
+            logger.info("Skipping Latent Space self-message %s", msg.id)
+            return
+
+        logger.info("[HANDLE] Latent Space message %s in room %s", msg.id, room_id)
+
+        graph = self.graph_factory([]) if self.graph_factory else self._static_graph
+        if not graph:
+            raise RuntimeError("No graph available")
+
+        messages: list[Any] = []
+        if is_session_bootstrap:
+            if self.graph_factory and room_id not in self._bootstrapped_rooms:
+                messages.append(("system", self._system_prompt))
+                self._bootstrapped_rooms.add(room_id)
+            if history:
+                messages.extend(history)
+
+        if participants_msg:
+            messages.append(("user", f"[System]: {participants_msg}"))
+
+        if contacts_msg:
+            messages.append(("user", f"[System]: {contacts_msg}"))
+
+        messages.append(("user", msg.format_for_llm()))
+        graph_input = {"messages": messages}
+
+        final_text: str | None = None
+
+        try:
+            async for event in graph.astream_events(
+                graph_input,
+                config={
+                    "configurable": {"thread_id": room_id},
+                    "recursion_limit": self.recursion_limit,
+                },
+                version="v2",
+            ):
+                if event.get("event") == "on_chat_model_end":
+                    candidate = self._extract_plain_model_text(event)
+                    if candidate:
+                        final_text = candidate
+
+            if not final_text:
+                raise RuntimeError("Latent Space produced no final response text.")
+
+            await tools.send_message(final_text, self._reply_mentions(msg, tools))
+            logger.info("[DONE] Latent Space message %s processed successfully", msg.id)
+
+        except Exception as exc:
+            logger.error("Error processing message %s: %s", msg.id, exc, exc_info=True)
+            try:
+                await tools.send_event(content=f"Error: {exc}", message_type="error")
+            except Exception:
+                pass
+            raise
+
+    def _already_processed(self, msg: Any) -> bool:
+        processed_message_ids = getattr(self, "_processed_message_ids", None)
+        if processed_message_ids is None:
+            processed_message_ids = set()
+            self._processed_message_ids = processed_message_ids
+
+        message_id = getattr(msg, "id", None)
+        if not message_id:
+            return False
+        if message_id in processed_message_ids:
+            return True
+
+        processed_message_ids.add(message_id)
+        return False
+
+    def _is_self_message(self, msg: Any, tools: Any) -> bool:
+        sender_id = getattr(msg, "sender_id", None)
+        own_agent_id = getattr(self, "_own_agent_id", None)
+        if sender_id and own_agent_id and sender_id == own_agent_id:
+            return True
+
+        participants = getattr(tools, "participants", []) or []
+        for participant in participants:
+            if participant.get("id") != sender_id:
+                continue
+            sender_name = " ".join(
+                str(participant.get(key) or "")
+                for key in ("handle", "name", "username")
+            ).lower()
+            return "latent-state" in sender_name or "latent_state" in sender_name
+
+        return False
+
+    @staticmethod
+    def _extract_plain_model_text(event: dict[str, Any]) -> str | None:
+        output = event.get("data", {}).get("output")
+        if not output:
+            return None
+
+        text = SingleDeliveryLangGraphAdapter._message_text(output)
+        if text:
+            return text
+
+        for generation in getattr(output, "generations", []) or []:
+            candidates = generation if isinstance(generation, list) else [generation]
+            for candidate in candidates:
+                message = getattr(candidate, "message", candidate)
+                text = SingleDeliveryLangGraphAdapter._message_text(message)
+                if text:
+                    return text
+
+        return None
+
+    @staticmethod
+    def _reply_mentions(msg: Any, tools: Any) -> list[str]:
+        participants = getattr(tools, "participants", []) or []
+        sender_id = getattr(msg, "sender_id", None)
+
+        for participant in participants:
+            if participant.get("id") == sender_id:
+                handle = participant.get("handle") or participant.get("name")
+                return [handle] if handle else []
+
+        return []
+
+    @staticmethod
+    def _message_text(message: Any) -> str | None:
+        if getattr(message, "tool_calls", None):
+            return None
+
+        content = getattr(message, "content", None)
+        if not content:
+            content = getattr(message, "text", None)
+
+        if isinstance(content, str):
+            text = content.strip()
+            return text or None
+
+        if isinstance(content, list):
+            parts = []
+            for part in content:
+                if isinstance(part, str):
+                    parts.append(part)
+                elif isinstance(part, dict) and isinstance(part.get("text"), str):
+                    parts.append(part["text"])
+            text = "\n".join(parts).strip()
+            return text or None
+
+        return None
+
+
 async def main():
     agent_id, api_key = load_agent_credentials("latent_state")
     logger.info("Loaded Latent Space agent: %s", agent_id)
@@ -204,11 +385,7 @@ async def main():
         max_bucket_size=1,
     )
 
-    model = (
-        os.getenv("LATENT_STATE_MODEL")
-        or os.getenv("GROQ_MODEL")
-        or DEFAULT_GROQ_MODEL
-    )
+    model = _resolve_groq_model()
     llm = ChatOpenAI(
         api_key=groq_api_key,
         model=model,
@@ -218,12 +395,12 @@ async def main():
         callbacks=[AgentWhiteboxLogger()],
     )
 
-    adapter = LangGraphAdapter(
-        llm=llm,
-        checkpointer=InMemorySaver(),
+    checkpointer = InMemorySaver()
+    adapter = SingleDeliveryLangGraphAdapter(
+        graph_factory=_build_graph_factory(llm, checkpointer),
         custom_section=SYSTEM_PROMPT,
-        additional_tools=TOOLS,
     )
+    adapter._own_agent_id = agent_id
 
     agent = Agent.create(
         adapter=adapter,
@@ -245,6 +422,21 @@ def _round_floats(value):
     if isinstance(value, dict):
         return {key: _round_floats(item) for key, item in value.items()}
     return value
+
+
+def _resolve_groq_model() -> str:
+    model = (
+        os.getenv("LATENT_STATE_MODEL")
+        or os.getenv("GROQ_MODEL")
+        or DEFAULT_GROQ_MODEL
+    )
+    if model.startswith(GROQ_INCOMPATIBLE_MODEL_PREFIXES):
+        raise RuntimeError(
+            "LATENT_STATE_MODEL/GROQ_MODEL is set to a non-Groq model "
+            f"({model!r}). Latent Space uses Groq; unset LATENT_STATE_MODEL or "
+            f"set it to a Groq model such as {DEFAULT_GROQ_MODEL!r}."
+        )
+    return model
 
 
 if __name__ == "__main__":
