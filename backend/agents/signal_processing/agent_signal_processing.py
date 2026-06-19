@@ -156,6 +156,10 @@ quantitatively. You decide:
 YOUR RESPONSE back to the Band room must contain:
   • A report title with the ticker(s), for example:
     "SIGNAL PROCESSING ANALYSIS — AAPL"
+  • "SUMMARY": a concise 2-3 sentence frontend-friendly summary of the
+    quantitative result, including whether the evidence supports the lens and
+    the most important metric or comparison. Put this immediately after the
+    title so it remains visible in the collapsed live transcript.
   • A one-paragraph opening that says what lens/hypothesis you tested.
   • "Time Windows Chosen": list each window with start/end dates and explain
     why that window is appropriate for the lens. If the request asks about a
@@ -190,6 +194,9 @@ clearly and use the available window metrics as supporting evidence.
 Use this general format:
 
 SIGNAL PROCESSING ANALYSIS — <TICKER>
+
+SUMMARY
+<2-3 sentence quantitative summary for the frontend>
 
 I have completed the quantitative analysis for <ticker>, focusing on:
 "<lens>"

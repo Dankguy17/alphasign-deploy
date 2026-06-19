@@ -33,10 +33,12 @@ import asyncio
 import json
 import logging
 import os
+import re
+import uuid
 from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable
 
 from aiohttp import web
 
@@ -62,6 +64,31 @@ class AlphaSignAdapter:
         self._history: deque[dict[str, Any]] = deque(maxlen=MAX_HISTORY)
         self._subscribers: list[asyncio.Queue[dict | None]] = []
         self._app = self._build_app()
+        self._get_turn_limit: Callable[[], int] | None = None
+        self._set_turn_limit: Callable[[int], Awaitable[int]] | None = None
+        self._send_ticker: Callable[[str], Awaitable[str]] | None = None
+        self._create_room: Callable[[], Awaitable[dict[str, object]]] | None = None
+        self._close_room: Callable[[str | None], Awaitable[dict[str, object]]] | None = None
+
+    def configure_turn_limit(
+        self,
+        getter: Callable[[], int],
+        setter: Callable[[int], Awaitable[int]],
+    ) -> None:
+        """Expose the active session's turn limit to the HTTP GUI."""
+        self._get_turn_limit = getter
+        self._set_turn_limit = setter
+
+    def configure_start_agent(
+        self,
+        sender: Callable[[str], Awaitable[str]],
+        room_creator: Callable[[], Awaitable[dict[str, object]]],
+        room_closer: Callable[[str | None], Awaitable[dict[str, object]]],
+    ) -> None:
+        """Register the Band-only start agent used by GUI session creation."""
+        self._send_ticker = sender
+        self._create_room = room_creator
+        self._close_room = room_closer
 
     # ── Public API (called by main.py / SessionState) ─────────────────────
 
@@ -100,7 +127,12 @@ class AlphaSignAdapter:
         app.router.add_get("/stream",   self._handle_stream)
         app.router.add_get("/messages", self._handle_messages)
         app.router.add_get("/report",   self._handle_report)
+        app.router.add_get("/config",   self._handle_get_config)
+        app.router.add_post("/config",  self._handle_set_config)
         app.router.add_post("/reset",   self._handle_reset)
+        app.router.add_post("/api/sessions", self._handle_start_session)
+        app.router.add_post("/api/rooms", self._handle_create_room)
+        app.router.add_post("/api/rooms/close", self._handle_close_room)
         app.on_response_prepare.append(self._add_cors)
         return app
 
@@ -174,6 +206,23 @@ class AlphaSignAdapter:
             },
         )
 
+    async def _handle_get_config(self, request: web.Request) -> web.Response:
+        turn_limit = self._get_turn_limit() if self._get_turn_limit else 3
+        return web.json_response({"max_turns": turn_limit, "hard_max_turns": 3})
+
+    async def _handle_set_config(self, request: web.Request) -> web.Response:
+        if self._set_turn_limit is None:
+            return web.json_response({"error": "Turn configuration unavailable"}, status=503)
+        try:
+            payload = await request.json()
+            requested = int(payload["max_turns"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return web.json_response({"error": "max_turns must be an integer from 1 to 3"}, status=400)
+        if not 1 <= requested <= 3:
+            return web.json_response({"error": "max_turns must be from 1 to 3"}, status=400)
+        turn_limit = await self._set_turn_limit(requested)
+        return web.json_response({"max_turns": turn_limit, "hard_max_turns": 3})
+
     async def _handle_reset(self, request: web.Request) -> web.Response:
         """Clear history and notify subscribers."""
         self._history.clear()
@@ -184,6 +233,70 @@ class AlphaSignAdapter:
             except asyncio.QueueFull:
                 pass
         return web.json_response({"ok": True})
+
+    async def _handle_start_session(self, request: web.Request) -> web.Response:
+        if self._send_ticker is None:
+            return web.json_response({"error": "Band kickoff unavailable"}, status=503)
+        try:
+            payload = await request.json()
+            ticker = str(payload["ticker"]).strip().upper()
+        except (KeyError, TypeError, json.JSONDecodeError):
+            return web.json_response({"error": "ticker is required"}, status=400)
+        if not re.fullmatch(r"[A-Z^][A-Z0-9.^-]{0,14}", ticker):
+            return web.json_response({"error": "invalid ticker"}, status=400)
+
+        try:
+            room_id = await self._send_ticker(ticker)
+        except Exception:
+            logger.exception("Could not send Band kickoff for %s", ticker)
+            return web.json_response({"error": "Band kickoff failed"}, status=502)
+
+        now = datetime.now(timezone.utc).isoformat()
+        event = {
+            "type": "session_started",
+            "session_id": room_id,
+            "ticker": ticker,
+            "ts": now,
+        }
+        self.enqueue(event)
+        return web.json_response({
+            "session_id": room_id,
+            "ticker": ticker,
+            "status": "running",
+            "created_at": now,
+            "updated_at": now,
+            "agents": [],
+            "latest_event_id": str(uuid.uuid4()),
+            "report_ready": False,
+        }, status=201)
+
+    async def _handle_create_room(self, request: web.Request) -> web.Response:
+        if self._create_room is None:
+            return web.json_response({"error": "Start agent unavailable"}, status=503)
+        try:
+            room = await self._create_room()
+        except Exception as exc:
+            logger.exception("Could not create and populate Band room")
+            return web.json_response(
+                {"error": f"Band room creation failed: {exc}"}, status=502
+            )
+        self.enqueue({"type": "room_created", **room})
+        return web.json_response(room, status=201)
+
+    async def _handle_close_room(self, request: web.Request) -> web.Response:
+        if self._close_room is None:
+            return web.json_response({"error": "Room closing unavailable"}, status=503)
+        try:
+            payload = await request.json()
+            room_id = str(payload.get("room_id", "")).strip() or None
+            result = await self._close_room(room_id)
+        except (TypeError, json.JSONDecodeError):
+            return web.json_response({"error": "Invalid room close request"}, status=400)
+        except Exception as exc:
+            logger.exception("Could not close Band room")
+            return web.json_response({"error": f"Band room close failed: {exc}"}, status=502)
+        self.enqueue({"type": "room_closed", **result})
+        return web.json_response(result)
 
     # ── SSE helpers ───────────────────────────────────────────────────────
 

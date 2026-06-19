@@ -72,6 +72,12 @@ WORKFLOW
 4. Send a complete findings packet to the Band room.
 
 YOUR RESPONSE back to the Band room must contain:
+  - A report title, for example: "LATENT STATE ANALYSIS — AAPL"
+  - "SUMMARY": a concise 2-3 sentence frontend-friendly summary stating the
+    inferred direction (continuation, stabilization, reversal, or structural
+    break), confidence, and the strongest supporting latent-state metric. Put
+    this immediately after the title so it remains visible in the collapsed
+    live transcript.
   - Series name and date window
   - Filtered latent level
   - Kalman trend slope
@@ -80,6 +86,26 @@ YOUR RESPONSE back to the Band room must contain:
   - Whether structural_regime_shift is true
   - Groq-generated summary + confidence
   - A concise conclusion tied to the provided lens
+
+Use this general format:
+
+LATENT STATE ANALYSIS — <SERIES>
+
+SUMMARY
+<2-3 sentence latent-state summary for the frontend>
+
+Series and Date Window:
+...
+
+Latent State Findings:
+...
+
+Model Summary:
+...
+Confidence: <percent>
+
+Conclusion:
+...
 
 DELIVERING YOUR RESPONSE
 ------------------------

@@ -118,9 +118,8 @@ def test_band() -> bool:
         return False
 
     try:
-        # Tests the "executive" agent's credentials. Change the name to
-        # test a different agent defined in agent_config.yaml.
-        agent_id, api_key = load_agent_config("executive")
+        # Tests the Band-only start agent's credentials.
+        agent_id, api_key = load_agent_config("start_agent")
     except Exception as e:
         print(f"  SKIP: could not load agent_config.yaml ({e})")
         print("  Copy agent_config.yaml.example -> agent_config.yaml and fill in real values.")

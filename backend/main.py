@@ -10,7 +10,7 @@ Usage:
 Environment variables (all in backend/.env):
     MAX_TURNS_PER_SESSION   Max agent turns before a PDF report is generated.
                             Counts one turn every time any agent sends a message.
-                            Default: 12  (4 full Narrative→Signal→Latent loops)
+                            Hard-capped at 3. Default: 3.
     CONVERSATION_LOG_PATH   Where to write the running conversation log.
                             Default: alphasign_conversation.txt
     PDF_OUTPUT_PATH         Where the Executive summary PDF is written.
@@ -37,6 +37,7 @@ load_dotenv(find_dotenv())
 
 # Local imports
 from adapter import AlphaSignAdapter
+from start_agent import StartAgent
 from agents.executive.agent_executive import generate_executive_report
 
 logging.basicConfig(
@@ -46,7 +47,8 @@ logging.basicConfig(
 logger = logging.getLogger("alphasign.main")
 
 # ── Configuration ─────────────────────────────────────────────────────────────
-MAX_TURNS         = int(os.getenv("MAX_TURNS_PER_SESSION", "12"))
+MAX_TURNS         = int(os.getenv("MAX_TURNS_PER_SESSION", "3"))
+HARD_MAX_TURNS    = 3
 CONV_LOG_PATH     = Path(os.getenv("CONVERSATION_LOG_PATH", "alphasign_conversation.txt"))
 PDF_OUTPUT_PATH   = Path(os.getenv("PDF_OUTPUT_PATH", "alphasign_report.pdf"))
 
@@ -61,15 +63,37 @@ class SessionState:
 
     def __init__(self, adapter: AlphaSignAdapter, max_turns: int):
         self.adapter    = adapter
-        self.max_turns  = max_turns
+        self.max_turns  = max(1, min(max_turns, HARD_MAX_TURNS))
         self.turn_count = 0
         self.messages: list[dict] = []   # {agent, room_id, text, ts}
         self._report_triggered = False
+        self._agent_tasks: list[asyncio.Task] = []
         self._log_path = CONV_LOG_PATH
         self._log_path.write_text("")    # clear / create on startup
 
+    def bind_agent_tasks(self, tasks: list[asyncio.Task]) -> None:
+        """Register the live agent loops so the turn limit can stop them."""
+        self._agent_tasks = tasks
+
+    def _stop_agents(self) -> None:
+        """Hard-stop every agent loop; the adapter and report task stay alive."""
+        logger.info("Hard turn limit reached — cancelling all agent runtimes")
+        for task in self._agent_tasks:
+            if not task.done():
+                task.cancel()
+
     # Called from each agent's on_final_response hook (same asyncio thread)
     def record(self, agent_name: str, room_id: str, text: str) -> None:
+        # Agent WebSocket loops can continue receiving messages after the report
+        # threshold. Do not let those callbacks extend the configured session.
+        if self.turn_count >= self.max_turns:
+            logger.info(
+                "Ignoring %s response — hard turn limit %d reached",
+                agent_name,
+                self.max_turns,
+            )
+            return
+
         ts = datetime.now(timezone.utc).isoformat()
         entry = {"agent": agent_name, "room_id": room_id, "text": text, "ts": ts}
         self.messages.append(entry)
@@ -93,6 +117,17 @@ class SessionState:
         if self.turn_count >= self.max_turns and not self._report_triggered:
             self._report_triggered = True
             asyncio.get_event_loop().create_task(self._generate_report())
+            self._stop_agents()
+
+    async def set_max_turns(self, requested: int) -> int:
+        """Update the live limit while enforcing the application-wide ceiling."""
+        self.max_turns = max(1, min(requested, HARD_MAX_TURNS))
+        logger.info("Session turn limit configured to %d", self.max_turns)
+        if self.turn_count >= self.max_turns and not self._report_triggered:
+            self._report_triggered = True
+            asyncio.create_task(self._generate_report())
+            self._stop_agents()
+        return self.max_turns
 
     async def _generate_report(self) -> None:
         logger.info("Turn limit reached — generating Executive PDF report…")
@@ -136,10 +171,17 @@ async def _run_latent_state(session: SessionState) -> None:
 async def run() -> None:
     adapter = AlphaSignAdapter()
     session = SessionState(adapter=adapter, max_turns=MAX_TURNS)
+    adapter.configure_turn_limit(lambda: session.max_turns, session.set_max_turns)
+    start_agent = StartAgent(Path(__file__).with_name("agent_config.yaml"))
+    adapter.configure_start_agent(
+        start_agent.send_ticker,
+        start_agent.create_room,
+        start_agent.close_room,
+    )
 
     logger.info(
         "AlphaSign starting — %d agents, max %d turns, log=%s, pdf=%s",
-        3, MAX_TURNS, CONV_LOG_PATH, PDF_OUTPUT_PATH,
+        3, session.max_turns, CONV_LOG_PATH, PDF_OUTPUT_PATH,
     )
 
     # Start the HTTP adapter server as a background task
@@ -151,6 +193,7 @@ async def run() -> None:
         asyncio.create_task(_run_signal_processing(session),  name="signal_processing"),
         asyncio.create_task(_run_latent_state(session),       name="latent_state"),
     ]
+    session.bind_agent_tasks(agent_tasks)
 
     all_tasks = [adapter_task] + agent_tasks
 

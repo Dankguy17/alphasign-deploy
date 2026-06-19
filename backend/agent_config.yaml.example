@@ -24,10 +24,11 @@ latent_state:
   agent_id: "00000000-0000-0000-0000-000000000003"
   api_key: "band_api_key_for_latent_state"
 
-# Handle: @<your band username>/executive
-executive:
+# Band-only initiator. Separate from agents/executive report generation.
+# Handle: @<your band username>/start-agent
+start_agent:
   agent_id: "00000000-0000-0000-0000-000000000004"
-  api_key: "band_api_key_for_executive"
+  api_key: "band_api_key_for_start_agent"
 
 # Test agent for development and testing (Gemini, free-tier)
 # Handle: @<your band username>/my-agent

@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { AgentGraph } from "@/components/agent-graph";
 import { AgentLanes } from "@/components/agent-lanes";
 import { MessageStream } from "@/components/message-stream";
@@ -15,6 +15,25 @@ export function AppShell() {
   const [resetting, setResetting] = useState(false);
   const [tickerInput, setTickerInput] = useState("");
   const [ticker, setTicker] = useState<string | null>(null);
+  const [maxTurns, setMaxTurns] = useState(3);
+  const [savingTurns, setSavingTurns] = useState(false);
+  const [turnsStatus, setTurnsStatus] = useState<string | null>(null);
+  const [tickerStatus, setTickerStatus] = useState<string | null>(null);
+  const [sendingTicker, setSendingTicker] = useState(false);
+  const [creatingRoom, setCreatingRoom] = useState(false);
+  const [roomStatus, setRoomStatus] = useState<string | null>(null);
+  const [roomId, setRoomId] = useState<string | null>(null);
+  const [closingRoom, setClosingRoom] = useState(false);
+  const [roomClosed, setRoomClosed] = useState(false);
+
+  useEffect(() => {
+    fetch("/api/alphasign/config", { cache: "no-store" })
+      .then((response) => response.json())
+      .then((value: { max_turns?: number }) => {
+        if (value.max_turns) setMaxTurns(value.max_turns);
+      })
+      .catch(() => undefined);
+  }, []);
 
   const activeAgent: AgentId | null =
     messages.length > 0 ? messages[messages.length - 1].agent : null;
@@ -31,12 +50,97 @@ export function AppShell() {
     }
   }
 
-  function handleTickerSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleTickerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const normalized = tickerInput.trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalized)) return;
-    setTicker(normalized);
-    setTickerInput(normalized);
+    setSendingTicker(true);
+    setTickerStatus(null);
+    try {
+      const response = await fetch("/api/alphasign/api/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: normalized }),
+      });
+      const result = (await response.json()) as { session_id?: string; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Could not send ticker to Band.");
+      setRoomId(result.session_id ?? null);
+      setRoomClosed(false);
+      setTicker(normalized);
+      setTickerInput(normalized);
+      setTickerStatus("Sent to Narrative Analyst.");
+    } catch (sendError) {
+      setTickerStatus(sendError instanceof Error ? sendError.message : "Could not send ticker.");
+    } finally {
+      setSendingTicker(false);
+    }
+  }
+
+  async function handleCreateRoom() {
+    setCreatingRoom(true);
+    setRoomStatus(null);
+    try {
+      const response = await fetch("/api/alphasign/api/rooms", { method: "POST" });
+      const result = (await response.json()) as {
+        room_id?: string;
+        participants?: unknown[];
+        error?: string;
+      };
+      if (!response.ok || !result.room_id) {
+        throw new Error(result.error ?? "Could not create Band room.");
+      }
+      setRoomStatus(
+        `Room ${result.room_id.slice(0, 8)}… ready with ${result.participants?.length ?? 4} participants.`,
+      );
+      setRoomId(result.room_id);
+      setRoomClosed(false);
+    } catch (roomError) {
+      setRoomStatus(roomError instanceof Error ? roomError.message : "Could not create room.");
+    } finally {
+      setCreatingRoom(false);
+    }
+  }
+
+  async function handleCloseRoom() {
+    if (!roomId || !window.confirm("Close this Band room and remove its runtime agents?")) return;
+    setClosingRoom(true);
+    setRoomStatus(null);
+    try {
+      const response = await fetch("/api/alphasign/api/rooms/close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ room_id: roomId }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Could not close Band room.");
+      setRoomClosed(true);
+      setRoomStatus("Band room closed.");
+    } catch (roomError) {
+      setRoomStatus(roomError instanceof Error ? roomError.message : "Could not close room.");
+    } finally {
+      setClosingRoom(false);
+    }
+  }
+
+  async function handleTurnsSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setSavingTurns(true);
+    setTurnsStatus(null);
+    try {
+      const response = await fetch("/api/alphasign/config", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ max_turns: maxTurns }),
+      });
+      const result = (await response.json()) as { max_turns?: number; error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Could not save turn limit.");
+      setMaxTurns(result.max_turns ?? maxTurns);
+      setTurnsStatus(`Limited to ${result.max_turns ?? maxTurns} turns.`);
+    } catch (saveError) {
+      setTurnsStatus(saveError instanceof Error ? saveError.message : "Could not save turn limit.");
+    } finally {
+      setSavingTurns(false);
+    }
   }
 
   return (
@@ -59,6 +163,16 @@ export function AppShell() {
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--primary)]" />
                 Report ready
               </span>
+            ) : null}
+            {reportReady && roomId && !roomClosed ? (
+              <button
+                type="button"
+                onClick={handleCloseRoom}
+                disabled={closingRoom}
+                className="btn-secondary px-3 py-1.5 text-xs"
+              >
+                {closingRoom ? "Closing room…" : "Close Band room"}
+              </button>
             ) : null}
             <button
               type="button"
@@ -85,10 +199,21 @@ export function AppShell() {
                   Set the ticker you want to follow in this observation session.
                 </p>
               </div>
-              <form
-                className="flex w-full gap-2 sm:w-auto"
-                onSubmit={handleTickerSubmit}
-              >
+              <div className="flex w-full flex-col gap-2 sm:w-auto">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCreateRoom}
+                    disabled={creatingRoom}
+                    className="btn-secondary h-9 px-3 text-xs"
+                  >
+                    {creatingRoom ? "Creating room…" : "Create Band room"}
+                  </button>
+                  {roomStatus ? (
+                    <span className="max-w-64 text-xs text-[var(--ink-subtle)]">{roomStatus}</span>
+                  ) : null}
+                </div>
+                <form className="flex gap-2" onSubmit={handleTickerSubmit}>
                 <label className="sr-only" htmlFor="ticker">
                   Stock ticker
                 </label>
@@ -105,10 +230,34 @@ export function AppShell() {
                   title="Enter a ticker such as AAPL or BRK.B"
                   className="h-10 min-w-0 flex-1 rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-2)] px-3 font-mono text-sm font-medium uppercase text-[var(--ink)] placeholder:text-[var(--ink-tertiary)] focus:border-[var(--primary-focus)] sm:w-40"
                 />
-                <button type="submit" className="btn-primary h-10 px-4 text-sm">
-                  Set ticker
+                <button type="submit" disabled={sendingTicker} className="btn-primary h-10 px-4 text-sm">
+                  {sendingTicker ? "Sending…" : "Set ticker"}
                 </button>
-              </form>
+                </form>
+                {tickerStatus ? (
+                  <span className="text-xs text-[var(--ink-subtle)]">{tickerStatus}</span>
+                ) : null}
+                <form className="flex items-center gap-2" onSubmit={handleTurnsSubmit}>
+                <label htmlFor="max-turns" className="text-xs text-[var(--ink-subtle)]">
+                  Turns
+                </label>
+                <input
+                  id="max-turns"
+                  type="number"
+                  min={1}
+                  max={3}
+                  value={maxTurns}
+                  onChange={(event) => setMaxTurns(Math.max(1, Math.min(3, Number(event.target.value))))}
+                  className="h-9 w-16 rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-2)] px-2 font-mono text-sm text-[var(--ink)]"
+                />
+                <button type="submit" disabled={savingTurns} className="btn-secondary h-9 px-3 text-xs">
+                  {savingTurns ? "Saving…" : "Apply"}
+                </button>
+                <span className="text-xs text-[var(--ink-subtle)]">
+                  {turnsStatus ?? "Maximum 3"}
+                </span>
+                </form>
+              </div>
             </div>
           </section>
 
