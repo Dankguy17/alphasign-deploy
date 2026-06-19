@@ -3,7 +3,18 @@ const DEFAULT_URL =
   process.env.NEXT_PUBLIC_ALPHASIGN_API_URL?.replace(/\/$/, "") ?? "http://localhost:8765";
 
 function normalizeUrl(value: string) {
-  return value.trim().replace(/\/$/, "");
+  const normalized = value.trim().replace(/\/$/, "");
+  if (
+    typeof window !== "undefined" &&
+    window.location.protocol === "https:" &&
+    normalized.startsWith("http://")
+  ) {
+    const hostname = new URL(normalized).hostname;
+    if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1") {
+      return normalized.replace(/^http:\/\//, "https://");
+    }
+  }
+  return normalized;
 }
 
 export function getAdapterUrl() {
