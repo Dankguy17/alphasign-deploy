@@ -92,7 +92,15 @@ body {
 .ticker-intro-content h1 { color: white; font-size: clamp(64px, 11vw, 118px); font-weight: 650; letter-spacing: -.065em; line-height: .9; text-shadow: 0 8px 44px rgba(0,0,0,.5); }
 .brand-logo { filter: grayscale(1) brightness(0) invert(1); }
 .ticker-intro-title { display: flex; align-items: center; justify-content: center; }
-.ticker-intro-logo { width: 1.63em; height: 1.63em; margin: -.32em -.2em -.27em -.25em; object-fit: contain; transform: translate(22px, .05em); filter: grayscale(1) brightness(0) invert(1) drop-shadow(0 8px 44px rgba(0,0,0,.5)); }
+.ticker-intro-logo {
+  width: clamp(54px, 6vw, 84px);
+  height: clamp(54px, 6vw, 84px);
+  margin: -.18em .02em -.16em -.2em;
+  object-fit: contain;
+  transform: translate(10px, .03em);
+  flex: 0 0 auto;
+  filter: grayscale(1) brightness(0) invert(1) drop-shadow(0 8px 44px rgba(0,0,0,.5));
+}
 .ticker-intro-copy { margin-top: 24px; color: rgba(255,255,255,.64); font-size: clamp(15px, 2vw, 18px); }
 .ticker-intro-form { display: flex; width: min(100%, 440px); margin: 34px auto 0; padding: 6px; border: 1px solid rgba(255,255,255,.18); border-radius: 16px; background: rgba(28,28,32,.78); box-shadow: inset 0 1px rgba(255,255,255,.08), 0 18px 60px rgba(0,0,0,.34); backdrop-filter: blur(18px); }
 .ticker-intro-form input { min-width: 0; flex: 1; height: 50px; padding: 0 16px; border: 0; outline: 0; background: transparent; color: white; font-family: var(--font-mono); font-size: 15px; text-transform: uppercase; }
