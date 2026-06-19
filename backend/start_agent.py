@@ -3,28 +3,19 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
-
 from thenvoi import AgentTools, ThenvoiLink
-from thenvoi.config import load_agent_config
+
+from shared.config import load_agent_credentials
 
 
 class StartAgent:
     """Uses the Band-only start agent to mention Narrative Analyst in a shared room."""
 
-    def __init__(self, config_path: Path) -> None:
-        start_agent_id, start_agent_key = load_agent_config(
-            "start_agent", config_path=config_path
-        )
-        self._narrative_id, _ = load_agent_config(
-            "narrative_analyst", config_path=config_path
-        )
-        self._signal_id, _ = load_agent_config(
-            "signal_processing", config_path=config_path
-        )
-        self._latent_id, _ = load_agent_config(
-            "latent_state", config_path=config_path
-        )
+    def __init__(self) -> None:
+        start_agent_id, start_agent_key = load_agent_credentials("start_agent")
+        self._narrative_id, _ = load_agent_credentials("narrative_analyst")
+        self._signal_id, _ = load_agent_credentials("signal_processing")
+        self._latent_id, _ = load_agent_credentials("latent_state")
         # Executive report generation is local. A Band participant is optional
         # and only added when an ID is explicitly configured.
         self._executive_id = os.getenv("EXECUTIVE_AGENT_ID", "").strip()

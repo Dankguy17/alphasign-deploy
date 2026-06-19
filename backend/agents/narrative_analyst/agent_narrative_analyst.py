@@ -78,7 +78,6 @@ load_dotenv(find_dotenv())
 
 from thenvoi import Agent
 from thenvoi.adapters import LangGraphAdapter
-from thenvoi.config import load_agent_config
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import AIMessage
 from langchain_core.tools import tool
@@ -87,6 +86,8 @@ from langchain_core.callbacks import BaseCallbackHandler
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.prebuilt import create_react_agent
 from langchain_core.rate_limiters import InMemoryRateLimiter
+
+from shared.config import load_agent_credentials
 
 # Package-relative imports
 from .news_fetch import fetch_company_news
@@ -730,8 +731,7 @@ DEFAULT_FEATHERLESS_MODEL = "deepseek-ai/DeepSeek-V4-Pro"
 
 
 async def main(on_final_response: Callable[[str, str, str], None] | None = None):
-    config_path = _find_config_yaml()
-    agent_id, api_key = load_agent_config("narrative_analyst", config_path=config_path)
+    agent_id, api_key = load_agent_credentials("narrative_analyst")
     logger.info(f"Loaded Narrative Analyst agent: {agent_id}")
 
     rate_limiter = InMemoryRateLimiter(

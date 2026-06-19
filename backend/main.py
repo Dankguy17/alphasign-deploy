@@ -30,7 +30,6 @@ import signal
 import sys
 import threading
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Awaitable, Callable
 
 from dotenv import load_dotenv, find_dotenv
@@ -289,7 +288,7 @@ async def run() -> None:
     adapter = AlphaSignAdapter()
     session = SessionState(adapter=adapter, max_turns=MAX_TURNS)
     adapter.configure_turn_limit(lambda: session.max_turns, session.set_max_turns)
-    start_agent = StartAgent(Path(__file__).with_name("agent_config.yaml"))
+    start_agent = StartAgent()
     session.bind_room_closer(start_agent.close_room)
     adapter.configure_start_agent(
         start_agent.send_ticker,

@@ -12,7 +12,6 @@ services:
     ports:
       - "${ADAPTER_PORT:-8765}:8765"
     volumes:
-      - /var/lib/alphasign/agent_config.yaml:/app/backend/agent_config.yaml:ro
       - backend-data:/data
     restart: unless-stopped
 

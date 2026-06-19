@@ -265,15 +265,17 @@ export function AppShell() {
           <div className="ticker-intro-content">
             <p className="ticker-intro-kicker">Multi-agent market intelligence</p>
             <h1 className="ticker-intro-title">
-              <Image
-                src="/logo.png"
-                alt="A"
-                width={118}
-                height={118}
-                priority
-                className="brand-logo ticker-intro-logo"
-              />
-              <span>lphaSign</span>
+              <span className="ticker-intro-mark">
+                <Image
+                  src="/logo.png"
+                  alt="A"
+                  width={118}
+                  height={118}
+                  priority
+                  className="brand-logo ticker-intro-logo"
+                />
+              </span>
+              <span className="ticker-intro-wordmark">lphaSign</span>
             </h1>
             <p className="ticker-intro-copy">Enter a market ticker to begin the signal.</p>
             <form className="ticker-intro-form" onSubmit={handleTickerOpen}>
