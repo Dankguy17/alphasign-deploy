@@ -42,13 +42,16 @@ export function AppShell() {
   const [adapterUrlInput, setAdapterUrlInput] = useState("");
 
   useEffect(() => {
-    setAdapterUrlInput(getAlphaSignBaseUrl());
+    const adapterUrlTimer = window.setTimeout(() => {
+      setAdapterUrlInput(getAlphaSignBaseUrl());
+    }, 0);
     fetch("/api/alphasign/config", { cache: "no-store" })
       .then((response) => response.json())
       .then((value: { max_turns?: number }) => {
         if (value.max_turns) setMaxTurns(value.max_turns);
       })
       .catch(() => undefined);
+    return () => window.clearTimeout(adapterUrlTimer);
   }, []);
 
   useEffect(() => {
@@ -288,7 +291,7 @@ export function AppShell() {
                 maxLength={10}
                 autoComplete="off"
                 spellCheck={false}
-                pattern="[A-Za-z][A-Za-z0-9.-]{0,9}"
+                pattern="[A-Za-z][-A-Za-z0-9.]{0,9}"
                 aria-describedby={tickerStatus ? "intro-ticker-status" : undefined}
               />
               <button type="submit" disabled={!tickerInput.trim()}>
@@ -399,7 +402,7 @@ export function AppShell() {
                   maxLength={10}
                   autoComplete="off"
                   spellCheck={false}
-                  pattern="[A-Za-z][A-Za-z0-9.-]{0,9}"
+                  pattern="[A-Za-z][-A-Za-z0-9.]{0,9}"
                   title="Enter a ticker such as AAPL or BRK.B"
                   className="h-10 min-w-0 flex-1 rounded-md border border-[var(--hairline-strong)] bg-[var(--surface-2)] px-3 font-mono text-sm font-medium uppercase text-[var(--ink)] placeholder:text-[var(--ink-tertiary)] focus:border-[var(--primary-focus)] sm:w-40"
                 />
@@ -552,7 +555,7 @@ export function AppShell() {
           <section className="panel p-5">
             <h2 className="panel-title">Connection</h2>
             <p className="mt-2.5 break-all font-mono text-xs leading-5 text-[var(--ink-subtle)]">
-              {getAlphaSignBaseUrl()}
+              {adapterUrlInput || "Loading adapter URL..."}
             </p>
             <dl className="mt-4 grid grid-cols-2 gap-2.5 text-xs">
               <div className="inset p-3">

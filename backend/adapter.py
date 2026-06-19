@@ -182,7 +182,12 @@ class AlphaSignAdapter:
 
         try:
             while True:
-                entry = await queue.get()
+                try:
+                    entry = await asyncio.wait_for(queue.get(), timeout=15)
+                except TimeoutError:
+                    # Keep intermediaries from treating an idle SSE stream as stale.
+                    await response.write(b": keepalive\n\n")
+                    continue
                 if entry is None:
                     break   # None is the shutdown sentinel
                 await self._sse_send(response, entry)
