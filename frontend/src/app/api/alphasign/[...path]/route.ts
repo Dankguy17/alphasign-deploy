@@ -28,6 +28,7 @@ async function proxyRequest(request: NextRequest, context: RouteContext) {
       headers: copyHeaders(request),
       body: request.method === "GET" ? undefined : await request.text(),
       cache: "no-store",
+      signal: request.signal,
     });
 
     return new Response(upstream.body, {

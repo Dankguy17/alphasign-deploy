@@ -17,17 +17,18 @@ export function AppShell() {
   const {
     appendEvent,
     beginSession,
+    canStartSession,
     connectionLabel,
     error,
     events,
     fixtureMode,
     health,
-    isStarting,
     loadFixturePreview,
     market,
     refreshHealth,
     report,
     session,
+    startDisabledReason,
   } = useAnalysisSession();
 
   const onEvent = useCallback((event: Parameters<typeof appendEvent>[0]) => {
@@ -69,7 +70,11 @@ export function AppShell() {
 
       <div className="mx-auto grid max-w-7xl gap-4 px-4 py-4 sm:px-6 lg:grid-cols-[minmax(0,1fr)_24rem] lg:px-8">
         <div className="space-y-4">
-          <TickerCommand disabled={isStarting} onSubmit={beginSession} />
+          <TickerCommand
+            disabled={!canStartSession}
+            disabledReason={startDisabledReason}
+            onSubmit={beginSession}
+          />
           {error || health?.message ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               <div className="font-semibold">Adapter status</div>

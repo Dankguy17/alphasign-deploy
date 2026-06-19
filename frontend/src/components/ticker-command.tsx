@@ -17,10 +17,15 @@ const defaultTickers = [
 
 type TickerCommandProps = {
   disabled?: boolean;
+  disabledReason?: string | null;
   onSubmit: (ticker: string) => void;
 };
 
-export function TickerCommand({ disabled, onSubmit }: TickerCommandProps) {
+export function TickerCommand({
+  disabled,
+  disabledReason,
+  onSubmit,
+}: TickerCommandProps) {
   const [ticker, setTicker] = useState("NVDA");
   const [recent, setRecent] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
@@ -36,6 +41,7 @@ export function TickerCommand({ disabled, onSubmit }: TickerCommandProps) {
   }, [recent, ticker]);
 
   function submit(nextTicker = ticker) {
+    if (disabled) return;
     const normalized = nextTicker.trim().toUpperCase();
     if (!normalized) return;
     const nextRecent = [normalized, ...recent.filter((item) => item !== normalized)].slice(
@@ -81,11 +87,17 @@ export function TickerCommand({ disabled, onSubmit }: TickerCommandProps) {
         <button
           type="submit"
           disabled={disabled}
+          aria-describedby={disabledReason ? "ticker-submit-status" : undefined}
           className="h-11 rounded-md bg-[var(--alpha-700)] px-4 text-sm font-semibold text-white transition hover:bg-[var(--alpha-800)] disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          {disabled ? "Starting..." : "Run Band analysis"}
+          {disabled ? "Start unavailable" : "Run Band analysis"}
         </button>
       </form>
+      {disabledReason ? (
+        <p id="ticker-submit-status" className="mt-2 text-xs text-slate-500">
+          {disabledReason}
+        </p>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2" aria-label="Ticker suggestions">
         {suggestions.map((item) => (
           <button

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   getHealth,
   getMarketSnapshot,
@@ -26,6 +26,7 @@ import type {
 type LoadState = "idle" | "loading" | "ready" | "error";
 
 export function useAnalysisSession() {
+  const startInFlightRef = useRef(false);
   const [health, setHealth] = useState<HealthStatus | null>(null);
   const [healthState, setHealthState] = useState<LoadState>("idle");
   const [session, setSession] = useState<SessionState | null>(null);
@@ -35,6 +36,8 @@ export function useAnalysisSession() {
   const [error, setError] = useState<string | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [fixtureMode, setFixtureMode] = useState(false);
+  const [retryAfter, setRetryAfter] = useState<number | null>(null);
+  const [isCoolingDown, setIsCoolingDown] = useState(false);
 
   const refreshHealth = useCallback(async () => {
     const controller = new AbortController();
@@ -43,6 +46,8 @@ export function useAnalysisSession() {
       const value = await getHealth(controller.signal);
       setHealth(value);
       setHealthState("ready");
+      setRetryAfter(null);
+      setIsCoolingDown(false);
       setError(null);
     } catch (healthError) {
       setHealth({
@@ -65,13 +70,44 @@ export function useAnalysisSession() {
     return () => window.clearTimeout(timer);
   }, [refreshHealth]);
 
+  useEffect(() => {
+    if (retryAfter == null) return;
+    const remaining = retryAfter - Date.now();
+    if (remaining <= 0) {
+      const timer = window.setTimeout(() => {
+        setIsCoolingDown(false);
+        setRetryAfter(null);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    const timer = window.setTimeout(() => {
+      setIsCoolingDown(false);
+      setRetryAfter(null);
+    }, remaining);
+    return () => window.clearTimeout(timer);
+  }, [retryAfter]);
+
   const beginSession = useCallback(async (ticker: string) => {
+    if (startInFlightRef.current) return;
+
+    const retryBlocked = retryAfter != null && Date.now() < retryAfter;
+    if (retryBlocked) {
+      setError("Session start is cooling down after a failed adapter request.");
+      return;
+    }
+
+    if (health?.status !== "ok") {
+      setError("Connect the backend adapter before starting a live Band session.");
+      return;
+    }
+
     const normalizedTicker = ticker.trim().toUpperCase();
     if (!/^[A-Z][A-Z0-9.-]{0,9}$/.test(normalizedTicker)) {
       setError("Enter a valid ticker symbol.");
       return;
     }
 
+    startInFlightRef.current = true;
     setIsStarting(true);
     setFixtureMode(false);
     setError(null);
@@ -99,10 +135,13 @@ export function useAnalysisSession() {
           ? sessionError.message
           : "Could not start analysis session.",
       );
+      setIsCoolingDown(true);
+      setRetryAfter(Date.now() + 3000);
     } finally {
+      startInFlightRef.current = false;
       setIsStarting(false);
     }
-  }, []);
+  }, [health?.status, retryAfter]);
 
   const loadFixturePreview = useCallback(() => {
     setFixtureMode(true);
@@ -156,9 +195,25 @@ export function useAnalysisSession() {
     return "Disconnected";
   }, [health, healthState]);
 
+  const canStartSession = useMemo(() => {
+    if (isStarting) return false;
+    if (health?.status !== "ok") return false;
+    if (isCoolingDown) return false;
+    return true;
+  }, [health?.status, isCoolingDown, isStarting]);
+
+  const startDisabledReason = useMemo(() => {
+    if (isStarting) return "Starting session...";
+    if (isCoolingDown) return "Cooling down after a failed adapter request.";
+    if (healthState === "loading") return "Checking backend adapter...";
+    if (health?.status !== "ok") return "Backend adapter is disconnected.";
+    return null;
+  }, [health?.status, healthState, isCoolingDown, isStarting]);
+
   return {
     appendEvent,
     beginSession,
+    canStartSession,
     connectionLabel,
     error,
     events,
@@ -171,5 +226,6 @@ export function useAnalysisSession() {
     refreshHealth,
     report,
     session,
+    startDisabledReason,
   };
 }

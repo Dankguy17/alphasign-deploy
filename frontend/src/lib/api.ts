@@ -83,7 +83,7 @@ export async function searchTickers(
 }
 
 export function eventsUrl(sessionId: string) {
-  return `${API_BASE_URL}/api/sessions/${encodeURIComponent(sessionId)}/events`;
+  return `${ADAPTER_BASE_URL}/api/sessions/${encodeURIComponent(sessionId)}/events`;
 }
 
 async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
