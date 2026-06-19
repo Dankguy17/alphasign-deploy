@@ -30,6 +30,7 @@ import signal
 import sys
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Awaitable, Callable
 
 from dotenv import load_dotenv, find_dotenv
