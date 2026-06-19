@@ -127,6 +127,7 @@ class AlphaSignAdapter:
 
     def _build_app(self) -> web.Application:
         app = web.Application()
+        app.router.add_get("/health",   self._handle_health)
         app.router.add_get("/stream",   self._handle_stream)
         app.router.add_get("/messages", self._handle_messages)
         app.router.add_get("/report",   self._handle_report)
@@ -149,6 +150,10 @@ class AlphaSignAdapter:
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
 
     # ── Handlers ─────────────────────────────────────────────────────────
+
+    async def _handle_health(self, request: web.Request) -> web.Response:
+        """Report readiness for the frontend and deployment health checks."""
+        return web.json_response({"status": "ok", "band_configured": True})
 
     async def _handle_stream(self, request: web.Request) -> web.StreamResponse:
         """
