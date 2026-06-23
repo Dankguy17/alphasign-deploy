@@ -107,8 +107,8 @@ body {
 }
 
 .ticker-intro-logo {
-  width: clamp(58px, 7vw, 82px);
-  height: clamp(58px, 7vw, 82px);
+  width: clamp(82px, 10vw, 115px);
+  height: clamp(82px, 10vw, 115px);
   object-fit: contain;
 
   filter:
@@ -118,8 +118,7 @@ body {
     drop-shadow(0 8px 44px rgba(0,0,0,.5));
 
   transform: translateY(0.03em);
-  margin-right: -0.015em;
-  display: block;
+  margin-right: -0.02em;
 }
 
 .ticker-intro-wordmark {
